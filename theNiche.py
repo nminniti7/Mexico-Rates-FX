@@ -1008,18 +1008,78 @@ def parse_icap_numbers(raw_bytes: bytes) -> pd.DataFrame:
 # FETCHERS (network layer — cached so we don't re-download on every click)
 # ═════════════════════════════════════════════════════════════════════════
 BROWSER_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+                  "(KHTML, like Gecko) Version/17.4.1 Safari/605.1.15",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://www.google.com/",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
 }
+
+# BGC and GFI need a warm session — visit the homepage first so the server
+# sees a realistic referrer and any session cookies before requesting the file.
+SITE_HOMEPAGES = {
+    "BGC": "https://www.bgcsef.com/",
+    "GFI": "https://www.gfigroup.com/",
+}
+
+
+def _make_session(homepage: str) -> requests.Session:
+    s = requests.Session()
+    s.headers.update(BROWSER_HEADERS)
+    try:
+        s.get(homepage, timeout=15)
+        s.headers["Referer"] = homepage
+    except Exception:
+        pass
+    return s
+
+
+def _fetch_protected(url: str, homepage: str):
+    """Fetch a file from a bot-protected site (GFI/BGC), trying the most
+    capable method available and falling back gracefully:
+      1. cloudscraper — solves Cloudflare-style browser checks (if installed)
+      2. warmed requests.Session — homepage visit first for cookies+referer
+    Returns the response of whichever attempt got a 200 first, else the
+    last response so the caller can report the real status code."""
+    last_r = None
+    # Attempt 1: cloudscraper (optional dependency — add 'cloudscraper' to
+    # requirements.txt to enable; skipped automatically if not installed)
+    try:
+        import cloudscraper
+        scraper = cloudscraper.create_scraper(
+            browser={"browser": "chrome", "platform": "darwin", "mobile": False}
+        )
+        try:
+            scraper.get(homepage, timeout=15)
+        except Exception:
+            pass
+        r = scraper.get(url, timeout=30)
+        if r.status_code == 200:
+            return r
+        last_r = r
+    except ImportError:
+        pass
+    except Exception:
+        pass
+    # Attempt 2: warmed plain session
+    r = _make_session(homepage).get(url, timeout=25)
+    if r.status_code == 200:
+        return r
+    return last_r if last_r is not None else r
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_source(sef_name: str, url: str, kind: str, report_date_str: str):
     try:
-        r = requests.get(url, headers=BROWSER_HEADERS, timeout=25)
+        if sef_name in SITE_HOMEPAGES:
+            r = _fetch_protected(url, SITE_HOMEPAGES[sef_name])
+        else:
+            r = requests.get(url, headers=BROWSER_HEADERS, timeout=25)
     except Exception as e:
         return None, f"Network error: {e}"
     if r.status_code == 404:

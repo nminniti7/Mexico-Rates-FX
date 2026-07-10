@@ -4,7 +4,33 @@ Mexico Rates & FX Desk — Cross-SEF Market Comparison Dashboard
 Compares Tradition, LatAm SEF, GFI, BGC, and ICAP (tpSEF) daily activity
 for MXN (and USD) TIIE swaps and FX products.
 
-WHAT CHANGED IN THIS VERSION (Tradition FX option notionals)
+WHAT CHANGED IN THIS VERSION (desk feedback)
+--------------------------------------------------------------------------
+1. Mexico products ONLY — the Non-Mexico and All-Products tabs are gone.
+2. Individual-trades drill-down now lives INSIDE each tab and is filtered
+   to that tab's category: the IRS tab shows only IRS trades, the FX tab
+   only FX trades.
+3. IRS tenor ladder restricted to the desk's standard points: 1M, 2M, 3M,
+   6M, 9M, 1Y-10Y, 12Y, 15Y, 20Y, 25Y, 30Y. Anything traded at another
+   tenor rolls into one 'Other / non-standard tenor' row so totals still
+   reconcile. Tenors with no trades that day are hidden (both tabs).
+4. DV01 is the default comparison metric: DV01 (USD) ≈ USD notional ×
+   tenor in years × 1bp — a flat-annuity approximation (no discounting)
+   that normalizes volume across the curve. Rates products only; the FX
+   tab automatically falls back to USD notional. Rows with no parseable
+   single tenor (spread trades) get no DV01 and are flagged.
+5. Month-to-date market share: pulls every business day of the month up
+   to the selected date (cached 24h after first load) and shows an MTD
+   share pie next to the daily one, converted with each day's ECB fixing.
+6. ICAP daily snapshots: the tpSEF page has no date in its URL and only
+   ever shows the latest business day, so each day the app saves that
+   day's parsed ICAP table to disk (icap_snapshots/). Selecting a past
+   date then loads the saved snapshot — accurate ICAP history from the
+   first day the app ran. NOTE: on Streamlit Community Cloud the disk is
+   wiped on redeploy/reboot; snapshots are fully durable on a local
+   machine.
+
+PREVIOUS VERSION (Tradition FX option notionals — still in effect)
 --------------------------------------------------------------------------
 Tradition's parser now reads the _NDA (Non-Delta-Adjusted, i.e. GROSS)
 notional columns instead of the _DA (Delta-Adjusted) columns. Two reasons:
@@ -160,6 +186,16 @@ TENOR_DISPLAY_LABELS = {
     "Other": "Other / unmatched",
 }
 
+# The ONLY tenors displayed on the IRS ladder (desk request). Anything
+# that traded at a tenor not on this list (e.g. 18M, 4M, ON) rolls into
+# a single 'Other / non-standard tenor' row so the totals still
+# reconcile — nothing is silently dropped, it's just not given its own row.
+IRS_DISPLAY_TENORS = (
+    ["1M", "2M", "3M", "6M", "9M"] +
+    [f"{y}Y" for y in range(1, 11)] +
+    ["12Y", "15Y", "20Y", "25Y", "30Y"]
+)
+
 
 def tenor_display(t: str) -> str:
     return TENOR_DISPLAY_LABELS.get(t, t)
@@ -263,6 +299,45 @@ def sort_tenors(series: pd.Series) -> pd.Categorical:
     known = [t for t in TENOR_ORDER if t in vals]
     other = sorted([t for t in vals if t not in known])
     return pd.Categorical(series, categories=known + other, ordered=True)
+
+
+def tenor_to_years(t) -> float:
+    """Convert a tenor label to years for the DV01 approximation.
+    Returns None for spread tenors ('1W vs 1M') and unparseable rows —
+    those get no DV01 and are excluded from DV01 comparisons."""
+    if not isinstance(t, str):
+        return None
+    up = t.strip().upper()
+    if up in ("ON", "TN", "SN"):
+        return 1 / 365
+    m = re.fullmatch(r'(\d+)Y', up)
+    if m:
+        return float(m.group(1))
+    m = re.fullmatch(r'(\d+)M', up)
+    if m:
+        return int(m.group(1)) / 12
+    m = re.fullmatch(r'(\d+)W', up)
+    if m:
+        return int(m.group(1)) / 52
+    m = re.fullmatch(r'(\d+)D', up)
+    if m:
+        return int(m.group(1)) / 365
+    return None
+
+
+def add_dv01(df: pd.DataFrame) -> pd.DataFrame:
+    """DV01 (USD) ≈ USD notional × tenor in years × 1bp. A flat-annuity
+    desk approximation (no discounting) — good for cross-SEF volume
+    comparison, not for risk. Only meaningful for rates products, so FX
+    rows get NA and the FX section falls back to USD notional."""
+    df = df.copy()
+    df["Tenor_Years"] = df["Tenor"].astype(str).apply(tenor_to_years)
+    df["DV01_USD"] = pd.NA
+    is_irs = df["Category"] == "IRS / Swap"
+    usd = pd.to_numeric(df["USD_Notional_Computed"], errors="coerce")
+    yrs = pd.to_numeric(df["Tenor_Years"], errors="coerce")
+    df.loc[is_irs, "DV01_USD"] = (usd * yrs * 1e-4)[is_irs]
+    return df
 
 
 # ── Product classification ────────────────────────────────────────────────
@@ -1120,6 +1195,78 @@ def fetch_uploaded(sef_name: str, kind: str, uploaded_file, report_date: datetim
     return None, "Unsupported upload kind"
 
 
+# Historical fetches (for month-to-date) — past days' files never change,
+# so cache them for a full day instead of 30 minutes.
+@st.cache_data(ttl=86400, show_spinner=False, max_entries=400)
+def fetch_source_hist(sef_name: str, url: str, kind: str, report_date_str: str):
+    return fetch_source(sef_name, url, kind, report_date_str)
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# ICAP DAILY SNAPSHOTS
+# ═════════════════════════════════════════════════════════════════════════
+# The tpSEF page has no date in the URL — it ONLY ever shows the latest
+# business day. So each day the app successfully pulls ICAP, it saves that
+# day's parsed table to disk. Selecting a past date then loads the saved
+# snapshot, making ICAP history available from the first day the app ran.
+# NOTE: on Streamlit Community Cloud the disk is wiped whenever the app is
+# redeployed or rebooted — snapshots are durable on a local machine, best-
+# effort on the cloud.
+import os
+
+ICAP_SNAPSHOT_DIR = "icap_snapshots"
+
+
+def _icap_snapshot_path(d: datetime) -> str:
+    return os.path.join(ICAP_SNAPSHOT_DIR, f"icap_{d.strftime('%Y%m%d')}.csv")
+
+
+def save_icap_snapshot(df: pd.DataFrame, d: datetime):
+    try:
+        os.makedirs(ICAP_SNAPSHOT_DIR, exist_ok=True)
+        df.to_csv(_icap_snapshot_path(d), index=False)
+    except Exception:
+        pass  # snapshot saving must never break the dashboard
+
+
+def load_icap_snapshot(d: datetime):
+    p = _icap_snapshot_path(d)
+    if not os.path.exists(p):
+        return None
+    try:
+        df = pd.read_csv(p, dtype=str)
+        for c in ["Notional_Local", "Notional_USD", "Trades", "Last_Price"]:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+        for c in ["MXN_Match", "Trades_Estimated"]:
+            if c in df.columns:
+                df[c] = df[c].astype(str).map({"True": True, "False": False}).fillna(False)
+        return df
+    except Exception:
+        return None
+
+
+def get_icap_for_date(cfg: dict, sel_date: datetime):
+    """Live fetch (and snapshot) when the selected date is the latest
+    business day; otherwise serve the saved snapshot for that date."""
+    is_latest = sel_date.date() == last_business_day().date()
+    if is_latest:
+        df, err = fetch_source("ICAP", cfg["url_template"], "icap", sel_date.strftime("%Y%m%d"))
+        if df is not None:
+            save_icap_snapshot(df, sel_date)
+            return df, None
+        snap = load_icap_snapshot(sel_date)
+        if snap is not None:
+            return snap, None
+        return None, err
+    snap = load_icap_snapshot(sel_date)
+    if snap is not None:
+        return snap, None
+    return None, ("No saved ICAP snapshot for this date — the tpSEF page only shows the "
+                  "latest business day, so ICAP history is available from the first day "
+                  "this app saved a snapshot onward.")
+
+
 # ═════════════════════════════════════════════════════════════════════════
 # SIDEBAR
 # ═════════════════════════════════════════════════════════════════════════
@@ -1175,7 +1322,14 @@ with st.sidebar:
                 manual_overrides[ccy] = v
 
     st.markdown("---")
-    metric_choice = st.radio("Compare by", ["USD Notional (converted)", "Local Notional", "Trade count"])
+    metric_choice = st.radio("Compare by", ["DV01 (USD)", "USD Notional (converted)", "Local Notional", "Trade count"])
+    if metric_choice == "DV01 (USD)":
+        st.caption("DV01 ≈ USD notional × tenor in years × 1bp (flat-annuity approximation, "
+                   "no discounting) — normalizes short vs. long tenors for volume comparison. "
+                   "Rates products only; the FX tab falls back to USD notional.")
+    show_mtd = st.checkbox("Month-to-date market share", value=True)
+    if show_mtd:
+        st.caption("Pulls every prior business day of the month — first load each day is slower.")
     show_exact = st.checkbox("Show exact numbers (not abbreviated M/B)", value=True)
     st.caption("Cached 30 min. Refresh the page to force an update.")
 
@@ -1196,8 +1350,17 @@ with st.spinner("Pulling data from all connected SEFs..."):
             if err:
                 status_msgs.append((name, "error", err))
             else:
+                if cfg["kind"] == "icap":
+                    save_icap_snapshot(df, sel_date)  # uploads count as that day's snapshot too
                 all_data.append(df)
                 status_msgs.append((name, "ok", f"{len(df):,} rows (uploaded)"))
+        elif cfg["kind"] == "icap":
+            df, err = get_icap_for_date(cfg, sel_date)
+            if err:
+                status_msgs.append((name, "error", err))
+            else:
+                all_data.append(df)
+                status_msgs.append((name, "ok", f"{len(df):,} rows"))
         elif cfg["url_template"]:
             date_str = sel_date.strftime(cfg["date_fmt"]) if cfg["date_fmt"] else ""
             url = cfg["url_template"].replace("{date}", date_str) if cfg["date_fmt"] else cfg["url_template"]
@@ -1226,8 +1389,11 @@ combined = pd.concat(all_data, ignore_index=True)
 combined["Tenor_Bucket"] = combined["Tenor"].astype(str).apply(tenor_bucket)
 combined["Tenor"] = sort_tenors(combined["Tenor"])
 combined = apply_fx(combined, fx_rates, manual_overrides, fx_source_label)
+combined = add_dv01(combined)
 
-if metric_choice == "USD Notional (converted)":
+if metric_choice == "DV01 (USD)":
+    metric_col = "DV01_USD"
+elif metric_choice == "USD Notional (converted)":
     metric_col = "USD_Notional_Computed"
 elif metric_choice == "Local Notional":
     metric_col = "Notional_Local"
@@ -1235,7 +1401,7 @@ else:
     metric_col = "Trades"
 
 missing_fx = combined[combined["USD_Notional_Computed"].isna() & (combined["Currency"] != "N/A")]
-if not missing_fx.empty and metric_choice == "USD Notional (converted)":
+if not missing_fx.empty and metric_col in ("USD_Notional_Computed", "DV01_USD"):
     miss_ccys = sorted(missing_fx["Currency"].unique())
     st.warning(
         f"⚠️ No FX rate available for **{', '.join(miss_ccys)}** — "
@@ -1246,30 +1412,45 @@ if not missing_fx.empty and metric_choice == "USD Notional (converted)":
 # ═════════════════════════════════════════════════════════════════════════
 # COMPARISON TABLE BUILDER
 # ═════════════════════════════════════════════════════════════════════════
-def build_comparison(data: pd.DataFrame, sefs_present: list) -> pd.DataFrame:
+def build_comparison(data: pd.DataFrame, sefs_present: list, mcol: str, category_label: str) -> pd.DataFrame:
     """
-    One row per tenor BUCKET on the FULL fixed ladder (0M, every month
-    1-11, every year 1-10, then 15Y/20Y/25Y/30Y) — always shown,
-    zero-filled if nothing traded — plus any extra tenors found in the
-    data that aren't on the standard ladder, appended after the ladder,
-    and finally an 'Other / unmatched' row if any rows couldn't be
-    matched to a tenor. Every trade in `data` therefore lands in exactly
-    one row, and the Total column reconciles with the market-share chart.
+    One row per tenor with activity, in ladder order.
+    - IRS: ONLY the desk's standard list (1M,2M,3M,6M,9M, 1Y-10Y, 12Y,15Y,
+      20Y,25Y,30Y). Anything that traded at another tenor rolls into a
+      single 'Other / non-standard tenor' row so totals still reconcile.
+    - FX: the full ladder (0M roll-up, months, years) plus extras.
+    Tenors with NO activity that day are hidden entirely.
+    Every trade lands in exactly one row, so the Total column reconciles
+    with the market-share chart.
     """
-    present_tenors = [t for t in data["Tenor_Bucket"].unique() if t != "Other"]
-    extra_tenors = sorted([t for t in present_tenors if t not in FULL_TENOR_LADDER], key=tenor_sort_key)
-    all_tenors = FULL_TENOR_LADDER + extra_tenors
-    if (data["Tenor_Bucket"] == "Other").any():
-        all_tenors = all_tenors + ["Other"]
+    data = data.copy()
+    if category_label == "IRS / Swap":
+        ladder = list(IRS_DISPLAY_TENORS)
+        data["Disp_Bucket"] = data["Tenor_Bucket"].where(
+            data["Tenor_Bucket"].isin(ladder), "Other")
+        other_label = "Other / non-standard tenor"
+    else:
+        present = [t for t in data["Tenor_Bucket"].unique() if t != "Other"]
+        extras = sorted([t for t in present if t not in FULL_TENOR_LADDER], key=tenor_sort_key)
+        ladder = FULL_TENOR_LADDER + extras
+        data["Disp_Bucket"] = data["Tenor_Bucket"]
+        other_label = "Other / unmatched"
+    if (data["Disp_Bucket"] == "Other").any():
+        ladder = ladder + ["Other"]
     rows = []
-    for tenor in all_tenors:
-        t_df = data[data["Tenor_Bucket"] == tenor]
-        row = {"Tenor": tenor_display(tenor)}
+    for tenor in ladder:
+        t_df = data[data["Disp_Bucket"] == tenor]
+        if t_df.empty:
+            continue  # hide tenors with no trades that day
+        label = other_label if tenor == "Other" else tenor_display(tenor)
+        row = {"Tenor": label}
         total = 0
         for sef in sefs_present:
-            v = t_df[t_df["SEF"] == sef][metric_col].sum()
+            v = t_df[t_df["SEF"] == sef][mcol].sum()
             row[sef] = v
             total += v if not pd.isna(v) else 0
+        if total == 0:
+            continue  # nothing measurable in this row for the chosen metric
         row["Total"] = total
         for sef in sefs_present:
             row[f"{sef} %"] = round(row[sef] / total * 100, 1) if total > 0 else 0
@@ -1277,8 +1458,9 @@ def build_comparison(data: pd.DataFrame, sefs_present: list) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def render_market_share_chart(cat_data: pd.DataFrame, sefs_present: list, category_label: str, currency_label: str):
-    totals = cat_data.groupby("SEF")[metric_col].sum().reindex(sefs_present).fillna(0)
+def render_market_share_chart(cat_data: pd.DataFrame, sefs_present: list, category_label: str, currency_label: str,
+                              mcol: str, chart_key: str):
+    totals = cat_data.groupby("SEF")[mcol].sum().reindex(sefs_present).fillna(0)
     grand_total = totals.sum()
     if grand_total <= 0:
         return
@@ -1296,7 +1478,7 @@ def render_market_share_chart(cat_data: pd.DataFrame, sefs_present: list, catego
         height=max(320, 55 * len(sefs_present)),
         showlegend=True,
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=chart_key)
     legend_line = "  ·  ".join(f"**{s}**: {shares[s]}% ({numfmt(totals[s])})" for s in sefs_present)
     st.caption(legend_line)
 
@@ -1345,14 +1527,21 @@ def render_fx_crosscheck(cat_data: pd.DataFrame, sefs_present: list):
         )
 
 
-def render_section(data: pd.DataFrame, category_label: str, sefs_present: list, group_label: str):
+def render_section(data: pd.DataFrame, category_label: str, sefs_present: list, group_label: str,
+                   mtd_data=None):
     cat_data = data[data["Category"] == category_label]
     if cat_data.empty:
         st.info(f"No {category_label} data for {group_label}.")
         return
 
+    # DV01 is a rates concept — the FX tab falls back to USD notional.
+    mcol, mlabel = metric_col, metric_choice
+    if category_label == "FX" and metric_col == "DV01_USD":
+        mcol, mlabel = "USD_Notional_Computed", "USD Notional (converted)"
+        st.caption("ℹ️ DV01 doesn't apply to FX products — this tab compares by USD notional instead.")
+
     st.markdown(f"#### {category_label}")
-    if category_label == "IRS / Swap" and group_label == "Mexico Products":
+    if category_label == "IRS / Swap":
         st.caption(
             "ℹ️ Mexican TIIE swaps are quoted by number of 28-day periods, not calendar time — "
             "the market counts 13 periods (364 days) as \"1 year,\" 26 as \"2 years,\" etc. "
@@ -1360,18 +1549,46 @@ def render_section(data: pd.DataFrame, category_label: str, sefs_present: list, 
             "same row — verified by price match (e.g. LatAm's 13x1 and Tradition's \"1 Year\" "
             "both quoted 6.735 the same day)."
         )
+        if mcol == "DV01_USD":
+            no_dv01 = cat_data[cat_data["DV01_USD"].isna()]
+            if not no_dv01.empty:
+                st.caption(f"ℹ️ {len(no_dv01)} row(s) have no parseable single tenor (spread trades etc.) — "
+                           f"no DV01 can be computed for them, so they're excluded from DV01 comparisons.")
 
     # KPI row — total per SEF, in the currently-selected metric
     kpi_cols = st.columns(len(sefs_present))
-    totals = cat_data.groupby("SEF")[metric_col].sum()
+    totals = cat_data.groupby("SEF")[mcol].sum()
     grand_total = totals.sum()
     for i, sef in enumerate(sefs_present):
         v = totals.get(sef, 0)
+        if mlabel == "Trade count":
+            unit = ""
+        elif mlabel.startswith("DV01"):
+            unit = " USD DV01"
+        elif mlabel.startswith("USD"):
+            unit = " USD"
+        else:
+            unit = " (local ccy)"
         share = round(v / grand_total * 100, 1) if grand_total > 0 else 0
-        unit = "" if metric_choice == "Trade count" else " USD" if metric_choice.startswith("USD") else " (local ccy)"
         kpi_cols[i].metric(sef, f"{share}%", f"{numfmt(v)}{unit}")
 
-    render_market_share_chart(cat_data, sefs_present, category_label, group_label)
+    render_market_share_chart(cat_data, sefs_present, category_label, f"{group_label} — today",
+                              mcol, chart_key=f"pie_day_{category_label}")
+
+    # Month-to-date market share
+    if mtd_data is not None:
+        mtd_cat = mtd_data[mtd_data["Category"] == category_label]
+        if not mtd_cat.empty:
+            mtd_mcol = mcol if mcol in mtd_cat.columns else "USD_Notional_Computed"
+            days_covered = sorted(mtd_cat["Date"].unique())
+            st.markdown("")
+            render_market_share_chart(
+                mtd_cat, sefs_present, category_label,
+                f"Month-to-date · {days_covered[0]} → {days_covered[-1]} · {len(days_covered)} day(s)",
+                mtd_mcol, chart_key=f"pie_mtd_{category_label}")
+            if "ICAP" not in mtd_cat["SEF"].unique():
+                st.caption("ℹ️ ICAP joins the month-to-date view as daily snapshots accumulate "
+                           "(the tpSEF page only ever shows the latest day).")
 
     st.markdown("")
     render_currency_breakdown(cat_data)
@@ -1379,16 +1596,23 @@ def render_section(data: pd.DataFrame, category_label: str, sefs_present: list, 
     st.markdown("")
     render_fx_crosscheck(cat_data, sefs_present)
 
-    # Full tenor-ladder comparison table
+    # Tenor-ladder comparison table (traded tenors only)
     st.markdown("")
-    comp = build_comparison(cat_data, sefs_present)
+    comp = build_comparison(cat_data, sefs_present, mcol, category_label)
+    if comp.empty:
+        st.info("No rows with a measurable value for the chosen metric.")
+        return
     display_cols = ["Tenor"] + sefs_present + ["Total"] + [f"{s} %" for s in sefs_present]
-    st.caption(
-        f"Full ladder: Cash/ON, TN, SN, 0M (1W/2W/3W), every month 1-11, every year 1-10, then 15Y/20Y/25Y/30Y "
-        f"(other long tenors only shown if actually traded; a final 'Other / unmatched' row "
-        f"catches anything the parser couldn't bucket) — {len(comp)} rows for "
-        f"{category_label} in {group_label} — values in **{metric_choice}**"
-    )
+    if category_label == "IRS / Swap":
+        ladder_note = ("IRS ladder: 1M, 2M, 3M, 6M, 9M, 1Y-10Y, 12Y, 15Y, 20Y, 25Y, 30Y — "
+                       "only tenors that actually traded are shown; anything at a non-standard "
+                       "tenor rolls into the 'Other / non-standard tenor' row so totals reconcile")
+    else:
+        ladder_note = ("FX ladder: 0M (1W/2W/3W), months, years — only tenors that actually "
+                       "traded are shown; a final 'Other / unmatched' row catches anything "
+                       "the parser couldn't bucket")
+    st.caption(f"{ladder_note} — {len(comp)} row(s) for {category_label} in {group_label} — "
+               f"values in **{mlabel}**")
     st.dataframe(
         comp[display_cols].style.format({**{s: numfmt for s in sefs_present}, "Total": numfmt,
                                           **{f"{s} %": "{:.1f}%" for s in sefs_present}}),
@@ -1396,10 +1620,8 @@ def render_section(data: pd.DataFrame, category_label: str, sefs_present: list, 
         height=min(35 * (len(comp) + 1) + 3, 900),
     )
 
-    # Reconciliation check — the ladder (incl. 'Other / unmatched') must
-    # account for EVERY trade in this section. If it ever disagrees with
-    # the chart/KPI total, something upstream is dropping rows — surface
-    # it immediately instead of hiding it.
+    # Reconciliation check — the ladder rows must account for every trade
+    # with a measurable value for the chosen metric.
     table_total = comp["Total"].sum()
     chart_total = grand_total if not pd.isna(grand_total) else 0
     if chart_total > 0 and abs(table_total - chart_total) / chart_total > 0.001:
@@ -1412,121 +1634,145 @@ def render_section(data: pd.DataFrame, category_label: str, sefs_present: list, 
         st.caption(f"✓ Reconciled: tenor table total ({numfmt(table_total)}) matches the market-share chart total.")
 
     proxy_sefs = [s for s in sefs_present if cat_data[cat_data["SEF"] == s]["Trades_Estimated"].any()]
-    if proxy_sefs and metric_choice == "Trade count":
+    if proxy_sefs and mlabel == "Trade count":
         st.caption(f"⚠️ Trade counts for {', '.join(proxy_sefs)} are a proxy (row count) — "
                    f"these sources don't publish a real trade-count field.")
 
-    unclassified = cat_data[cat_data["Tenor_Bucket"] == "Other"]
-    if not unclassified.empty:
-        un_total = unclassified[metric_col].sum()
-        with st.expander(f"⚠️ {len(unclassified)} row(s) couldn't be matched to a standard tenor — "
-                          f"{numfmt(un_total)} total, included in the 'Other / unmatched' row above (click to inspect)"):
-            st.dataframe(
-                unclassified[["SEF", "AssetClass", "Description", "Currency", "Notional_Local", "USD_Notional_Computed", "Trades"]]
-                .rename(columns={"USD_Notional_Computed": "USD Notional", "AssetClass": "Asset Class"}),
-                use_container_width=True, hide_index=True,
-            )
-            st.caption("Send these descriptions back and the tenor-matching rules can be extended to cover them.")
+    # ── Individual trades — filtered to THIS category only ────────────────
+    st.markdown("")
+    with st.expander(f"🔍 Individual {category_label} trades"):
+        dcol1, dcol2 = st.columns(2)
+        with dcol1:
+            drill_sef = st.selectbox("Source", sorted(cat_data["SEF"].unique()),
+                                     key=f"drill_sef_{category_label}")
+        sef_df = cat_data[cat_data["SEF"] == drill_sef]
+        with dcol2:
+            bucket_opts = sorted(sef_df["Tenor_Bucket"].unique(), key=tenor_sort_key)
+            true_opts = sorted(sef_df["Tenor"].astype(str).unique(), key=tenor_sort_key)
+            sef_tenors = ["All tenors"] + list(dict.fromkeys(bucket_opts + true_opts))
+            drill_tenor = st.selectbox("Tenor", sef_tenors, key=f"drill_tenor_{category_label}",
+                                       format_func=tenor_display)
+        if drill_tenor == "All tenors":
+            detail = sef_df
+        else:
+            detail = sef_df[(sef_df["Tenor_Bucket"] == drill_tenor) |
+                            (sef_df["Tenor"].astype(str) == drill_tenor)]
+        show_cols = ["Description", "AssetClass", "Currency", "Tenor", "Last_Price", "Notional_Local",
+                     "USD_Notional_Computed", "DV01_USD", "FX_Rate_Used", "FX_Source", "FX_CrossCheck", "Trades"]
+        if category_label == "FX":
+            show_cols.remove("DV01_USD")  # DV01 not meaningful for FX
+        show_cols = [c for c in show_cols if c in detail.columns]
+        st.dataframe(
+            detail[show_cols].rename(columns={
+                "AssetClass": "Asset Class", "Tenor": "True Tenor",
+                "Notional_Local": "Original Notional", "USD_Notional_Computed": "USD Notional",
+                "DV01_USD": "DV01 (USD)",
+                "FX_Rate_Used": "FX Rate (CCY/USD)", "FX_Source": "FX Source", "FX_CrossCheck": "Cross-Check",
+            }),
+            use_container_width=True, hide_index=True,
+        )
+        summary = (f"{len(detail)} row(s) · Total original notional: {numfmt(detail['Notional_Local'].sum())} "
+                   f"· Total USD notional: {numfmt(detail['USD_Notional_Computed'].sum())} ")
+        if category_label == "IRS / Swap" and "DV01_USD" in detail.columns:
+            summary += f"· Total DV01: {numfmt(detail['DV01_USD'].sum())} USD "
+        summary += f"· Total trades: {int(detail['Trades'].sum())}"
+        st.caption(summary)
+        st.caption("Asset Class codes: **IR** = interest rates · **CU** = currency/FX · **CD** = credit "
+                   "(taken from the source file where published — GFI, BGC, ICAP — and derived from the "
+                   "product category for Tradition and LatAm, which don't publish a code).")
+        if detail["Trades_Estimated"].any():
+            st.caption("⚠️ This source doesn't publish individual trade prints — each row above is already a daily aggregate.")
 
 
 # ═════════════════════════════════════════════════════════════════════════
-# MEXICO / NON-MEXICO TABS
+# MONTH-TO-DATE DATA (Mexico products only)
+# ═════════════════════════════════════════════════════════════════════════
+def _business_days_of_month(sel: datetime):
+    d = sel.replace(day=1)
+    days = []
+    while d.date() <= sel.date():
+        if d.weekday() < 5:
+            days.append(d)
+        d += timedelta(days=1)
+    return days
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def build_mtd_data(sel_date_str: str, manual_overrides: dict):
+    """Fetch every business day of the month up to (and including) the
+    selected date, keep only Mexico products, convert each day with THAT
+    day's ECB fixing, and compute DV01. Days a source has no file for
+    (holidays, blocked fetches, missing ICAP snapshots) are simply skipped
+    for that source. Historical files are cached for 24h."""
+    sel = datetime.strptime(sel_date_str, "%Y%m%d")
+    frames = []
+    for d in _business_days_of_month(sel):
+        ds = d.strftime("%Y%m%d")
+        day_frames = []
+        for name, cfg in SOURCES.items():
+            if cfg["kind"] == "icap":
+                snap = load_icap_snapshot(d)
+                if snap is not None:
+                    day_frames.append(snap)
+                continue
+            date_str = d.strftime(cfg["date_fmt"])
+            url = cfg["url_template"].replace("{date}", date_str)
+            df, err = fetch_source_hist(name, url, cfg["kind"], ds)
+            if df is not None:
+                day_frames.append(df)
+        if not day_frames:
+            continue
+        day = pd.concat(day_frames, ignore_index=True)
+        day = day[day["MXN_Match"]]
+        if day.empty:
+            continue
+        rates, lbl, _, _ = fetch_fx_rates(d.strftime("%Y-%m-%d"))
+        day = apply_fx(day, rates, manual_overrides, lbl)
+        day = add_dv01(day)
+        day["Date"] = d.strftime("%Y-%m-%d")
+        frames.append(day)
+    if not frames:
+        return None
+    return pd.concat(frames, ignore_index=True)
+
+
+mtd_data = None
+if show_mtd:
+    with st.spinner("Building month-to-date view (pulls each prior business day — cached after first load)..."):
+        try:
+            mtd_data = build_mtd_data(sel_date.strftime("%Y%m%d"), manual_overrides)
+        except Exception as e:
+            st.warning(f"Month-to-date view unavailable: {e}")
+            mtd_data = None
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# MEXICO PRODUCTS — IRS / FX
 # ═════════════════════════════════════════════════════════════════════════
 st.markdown("---")
-tab_mx, tab_nonmx, tab_all = st.tabs(["🇲🇽 Mexico Products", "🌎 Non-Mexico Products", "📊 All Products"])
 
 
 def get_mexico_slice(df):
     return df[df["MXN_Match"]]
 
 
-def get_non_mexico_slice(df):
-    return df[~df["MXN_Match"]]
+mexico_df = get_mexico_slice(combined)
+if mexico_df.empty:
+    st.error("No Mexico products found in any source for this date.")
+    st.stop()
 
-
-for tab, group_label, slicer in [
-    (tab_mx, "Mexico Products", get_mexico_slice),
-    (tab_nonmx, "Non-Mexico Products", get_non_mexico_slice),
-    (tab_all, "All Products", lambda df: df),
-]:
-    with tab:
-        slice_df = slicer(combined)
-        if slice_df.empty:
-            st.info(f"No data for {group_label}.")
-            continue
-        sefs_present = sorted(slice_df["SEF"].unique(), key=lambda s: list(SOURCES.keys()).index(s))
-        sub_irs, sub_fx = st.tabs(["📈 IRS / Swap", "💱 FX"])
-        with sub_irs:
-            render_section(slice_df, "IRS / Swap", sefs_present, group_label)
-        with sub_fx:
-            render_section(slice_df, "FX", sefs_present, group_label)
-
-# ═════════════════════════════════════════════════════════════════════════
-# DRILL-DOWN — pick one SEF + tenor to see every underlying row
-# ═════════════════════════════════════════════════════════════════════════
-st.markdown("---")
-st.header("🔍 Drill into individual trades")
-st.caption("Pick a group and tenor to see every row behind the aggregate numbers above, "
-           "including the raw asset-class code (IR = rates, CU = currency/FX, CD = credit), "
-           "the original currency, original notional, and the exact USD conversion used. "
-           "Tenors here are the TRUE per-trade tenors — pick '0M (1W/2W/3W)' to see "
-           "every week-tenor trade rolled into that summary bucket; Cash/ON, TN, and SN "
-           "keep their own rows.")
-
-dcol1, dcol2, dcol3 = st.columns(3)
-with dcol1:
-    drill_group = st.selectbox("Group", ["Mexico Products", "Non-Mexico Products", "All Products"], key="drill_grp")
-with dcol2:
-    if drill_group == "Mexico Products":
-        drill_slice = get_mexico_slice(combined)
-    elif drill_group == "Non-Mexico Products":
-        drill_slice = get_non_mexico_slice(combined)
-    else:
-        drill_slice = combined
-    drill_sef = st.selectbox("Source", sorted(drill_slice["SEF"].unique()) if not drill_slice.empty else [], key="drill_sef")
-with dcol3:
-    if drill_sef:
-        sef_df = drill_slice[drill_slice["SEF"] == drill_sef]
-        # Offer BOTH: the 0M roll-up bucket (so nothing sub-month is hard to
-        # find) and every true tenor that traded.
-        bucket_opts = sorted(sef_df["Tenor_Bucket"].unique(), key=tenor_sort_key)
-        true_opts = sorted(sef_df["Tenor"].astype(str).unique(), key=tenor_sort_key)
-        sef_tenors = list(dict.fromkeys(bucket_opts + true_opts))  # dedupe, keep order
-        drill_tenor = st.selectbox("Tenor", sef_tenors, key="drill_tenor",
-                                   format_func=tenor_display)
-    else:
-        drill_tenor = None
-
-if drill_sef and drill_tenor:
-    sef_df = drill_slice[drill_slice["SEF"] == drill_sef]
-    # Match on EITHER the bucket or the true tenor — selecting '0M' shows
-    # every ON/TN/week trade; selecting '1W' shows just the 1W trades.
-    detail = sef_df[(sef_df["Tenor_Bucket"] == drill_tenor) | (sef_df["Tenor"].astype(str) == drill_tenor)]
-    show_cols = ["Description", "AssetClass", "Currency", "Category", "Tenor", "Last_Price", "Notional_Local",
-                 "USD_Notional_Computed", "FX_Rate_Used", "FX_Source", "FX_CrossCheck", "Trades"]
-    show_cols = [c for c in show_cols if c in detail.columns]
-    st.dataframe(
-        detail[show_cols].rename(columns={
-            "AssetClass": "Asset Class", "Tenor": "True Tenor",
-            "Notional_Local": "Original Notional", "USD_Notional_Computed": "USD Notional",
-            "FX_Rate_Used": "FX Rate (CCY/USD)", "FX_Source": "FX Source", "FX_CrossCheck": "Cross-Check",
-        }),
-        use_container_width=True, hide_index=True,
-    )
-    st.caption(
-        f"{len(detail)} row(s) · Total original notional: {numfmt(detail['Notional_Local'].sum())} "
-        f"· Total USD notional: {numfmt(detail['USD_Notional_Computed'].sum())} "
-        f"· Total trades: {int(detail['Trades'].sum())}"
-    )
-    st.caption("Asset Class codes: **IR** = interest rates · **CU** = currency/FX · **CD** = credit "
-               "(taken from the source file where published — GFI, BGC, ICAP — and derived from the "
-               "product category for Tradition and LatAm, which don't publish a code).")
-    if detail["Trades_Estimated"].any():
-        st.caption("⚠️ This source doesn't publish individual trade prints — each row above is already a daily aggregate.")
+sefs_present = sorted(mexico_df["SEF"].unique(), key=lambda s: list(SOURCES.keys()).index(s))
+sub_irs, sub_fx = st.tabs(["📈 IRS / Swap", "💱 FX"])
+with sub_irs:
+    render_section(mexico_df, "IRS / Swap", sefs_present, "Mexico Products", mtd_data=mtd_data)
+with sub_fx:
+    render_section(mexico_df, "FX", sefs_present, "Mexico Products", mtd_data=mtd_data)
 
 # ═════════════════════════════════════════════════════════════════════════
 st.markdown("---")
 st.caption(
+    "DV01 (USD) ≈ USD notional × tenor in years × 1bp — a flat-annuity approximation with no "
+    "discounting, used to normalize volumes across the curve; not a risk number. "
     "USD Notional = Original Notional ÷ (official ECB daily reference rate for the currency, "
     "as of the trade date, via Frankfurter.app). USD figures a source publishes directly "
     "(Tradition, LatAm) are shown alongside our computed figure so any mismatch is visible "
@@ -1535,5 +1781,8 @@ st.caption(
     "apply option deltas as whole numbers (50x instead of 0.50x) and aren't comparable to "
     "the gross notionals other SEFs publish. CLP/COP/PEN require a "
     "manually-entered rate (sidebar) since the ECB doesn't publish fixings for them — those "
-    "trades are excluded from USD totals, never estimated, until a rate is supplied."
+    "trades are excluded from USD totals, never estimated, until a rate is supplied. "
+    "ICAP history: the tpSEF page only ever shows the latest business day, so the app saves a "
+    "snapshot each day it runs — past dates load from those snapshots (on Streamlit Cloud, "
+    "snapshots persist until the app is redeployed or rebooted)."
 )

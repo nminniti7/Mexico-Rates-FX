@@ -5,4 +5,4 @@ openpyxl
 beautifulsoup4
 lxml
 plotly
-curl_cffi
+curl_cffi==0.7.4

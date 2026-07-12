@@ -5,12 +5,26 @@ Tradition · LatAm SEF · GFI · BGC · ICAP (tpSEF)
 
 WHAT'S NEW IN THIS VERSION
 -------------------------
-1. CRASH FIX — the page died on `sorted(...)` whenever a source file had a
-   blank currency cell (pandas reads it back as float NaN, and you can't
-   sort a float against a string). Every sort/unique in the app now goes
-   through safe_sorted(), which coerces to str first. Nothing else was
-   changing the data — this alone is why nothing rendered.
-2. HISTORY IS NOW REAL. Two things are persisted per day, one file per day,
+1. GFI/BGC 403 FIX (RE-APPLIED). requests and cloudscraper both send a
+   Python TLS fingerprint that the GFI/BGC WAF rejects with HTTP 403 no
+   matter what headers you fake. The fix is curl_cffi with Chrome browser
+   impersonation, which presents a real Chrome TLS fingerprint. Order is
+   now: curl_cffi → cloudscraper → warmed requests session. Add BOTH
+   `curl_cffi` and `cloudscraper` to requirements.txt or Streamlit Cloud
+   won't install them and you're back to 403.
+2. ICAP DATES NOW ACTUALLY SAVE. Two bugs, both fixed:
+   a) The GitHub sync ran AFTER the sidebar rendered, so the sidebar
+      counted snapshots before history was pulled down — a fresh container
+      always said "1 day saved" even when the repo had more. Sync now runs
+      FIRST, before anything renders.
+   b) Snapshots were saved to local disk but only pushed to GitHub in one
+      code path. Streamlit Cloud wipes local disk on every redeploy, so
+      any snapshot that missed the push was gone forever. Every save point
+      (daily auto-capture, today's fetch, sidebar upload, backfill) now
+      pushes its file to the repo immediately.
+   The sidebar also now says out loud whether GitHub sync is configured —
+   no more silent data loss.
+3. HISTORY IS REAL. Two things are persisted per day, one file per day,
    never combined:
        icap_snapshots/icap_YYYYMMDD.csv   — that day's ICAP table
        dv01_grids/dv01_YYYYMMDD.csv       — that day's DV01 grid
@@ -18,22 +32,22 @@ WHAT'S NEW IN THIS VERSION
    grid. If a grid was never edited for a given day, the last saved grid is
    carried forward (and if there's none, the built-in default) — always
    labelled on screen so you know which you're looking at.
-3. GITHUB SYNC, SILENT. Streamlit Cloud wipes local disk on redeploy, so the
+4. GITHUB SYNC, SILENT. Streamlit Cloud wipes local disk on redeploy, so the
    app PULLS saved history from the repo at startup and PUSHES new days back.
    Config lives ONLY in .streamlit/secrets.toml under [github] — there's no
    panel and nothing to type. No secrets = local disk only, everything else
-   still works.
-4. BACKFILL. tpSEF only ever shows the latest business day, so past ICAP days
-   can't be re-fetched — but you can now upload an export and file it under
+   still works (and the sidebar warns you).
+5. BACKFILL. tpSEF only ever shows the latest business day, so past ICAP days
+   can't be re-fetched — but you can upload an export and file it under
    any date (sidebar → ICAP history → Backfill).
-5. NO FX CONVERSION ANYWHERE. Notional is whatever the source file says, in
+6. NO FX CONVERSION ANYWHERE. Notional is whatever the source file says, in
    the currency it was traded in, so it always ties to the raw file. Metrics
    are DV01 and notional-as-published. One trades drill-down, not two.
-6. DV01 grid can be PASTED in whole (sidebar) — two columns out of Excel or
+7. DV01 grid can be PASTED in whole (sidebar) — two columns out of Excel or
    the desk email, '13x1' period notation and all.
 
 Run:      streamlit run theNiche.py
-Install:  pip install streamlit pandas requests openpyxl beautifulsoup4 lxml plotly
+Install:  pip install streamlit pandas requests openpyxl beautifulsoup4 lxml plotly curl_cffi cloudscraper
 """
 
 import streamlit as st
@@ -338,11 +352,12 @@ def save_dv01_grid_for_date(g: dict, d: datetime) -> bool:
 def ensure_todays_dv01_grid():
     """Every business day gets its own grid file, even if nobody touches it —
     the carried-forward/default values are written down so a past date always
-    values on exactly what was in force that day."""
+    values on exactly what was in force that day. Pushed to GitHub on write."""
     d = last_business_day()
     if not os.path.exists(_dv01_path(d)):
         g, _ = load_dv01_grid_for_date(d)
-        save_dv01_grid_for_date(g, d)
+        if save_dv01_grid_for_date(g, d):
+            push_day_file(_dv01_path(d), DV01_GRID_DIR)
 
 
 def _norm_tenor_label(tok: str):
@@ -1041,9 +1056,33 @@ def _make_session(homepage: str) -> requests.Session:
 
 
 def _fetch_protected(url: str, homepage: str):
-    """GFI/BGC sit behind bot protection: try cloudscraper if installed, then
-    a warmed session."""
+    """GFI/BGC sit behind a WAF that fingerprints the TLS handshake itself —
+    plain `requests` (and usually cloudscraper too) get HTTP 403 no matter
+    what headers they send, because Python's TLS handshake doesn't look like
+    a browser's. THE FIX: curl_cffi with Chrome impersonation presents a real
+    Chrome TLS fingerprint and gets through. Order:
+        1. curl_cffi (impersonate='chrome') — the one that actually works
+        2. cloudscraper — solves plain-Cloudflare challenges
+        3. warmed requests session — last resort
+    curl_cffi MUST be in requirements.txt for this to work on Streamlit Cloud."""
     last_r = None
+
+    # 1 — curl_cffi with a real Chrome TLS fingerprint
+    try:
+        from curl_cffi import requests as creq
+        s = creq.Session(impersonate="chrome")
+        try:
+            s.get(homepage, timeout=15)
+        except Exception:
+            pass
+        r = s.get(url, headers={"Referer": homepage}, timeout=30)
+        if r.status_code == 200:
+            return r
+        last_r = r
+    except Exception:
+        pass
+
+    # 2 — cloudscraper
     try:
         import cloudscraper
         scraper = cloudscraper.create_scraper(
@@ -1055,9 +1094,12 @@ def _fetch_protected(url: str, homepage: str):
         r = scraper.get(url, timeout=30)
         if r.status_code == 200:
             return r
-        last_r = r
+        if last_r is None:
+            last_r = r
     except Exception:
         pass
+
+    # 3 — warmed plain-requests session
     r = _make_session(homepage).get(url, timeout=25)
     return r if r.status_code == 200 else (last_r if last_r is not None else r)
 
@@ -1074,7 +1116,8 @@ def fetch_source(sef_name: str, url: str, kind: str, report_date_str: str):
     if r.status_code == 404:
         return None, "No file for this date (market may have been closed)."
     if r.status_code == 403:
-        return None, "Blocked (HTTP 403) — the site refused an automated request."
+        return None, ("Blocked (HTTP 403) — the site refused an automated request. "
+                      "Make sure curl_cffi is in requirements.txt (that's the fix).")
     if r.status_code != 200:
         return None, f"HTTP {r.status_code}"
     try:
@@ -1121,10 +1164,15 @@ def _icap_snapshot_path(d: datetime) -> str:
     return os.path.join(ICAP_SNAPSHOT_DIR, f"icap_{d.strftime('%Y%m%d')}.csv")
 
 
-def save_icap_snapshot(df: pd.DataFrame, d: datetime) -> bool:
+def save_icap_snapshot(df: pd.DataFrame, d: datetime, push: bool = True) -> bool:
+    """Write the day-file AND immediately push it to GitHub. Local disk on
+    Streamlit Cloud is wiped on every redeploy — a snapshot that isn't pushed
+    the moment it's written can be lost forever (tpSEF can't be re-fetched)."""
     try:
         os.makedirs(ICAP_SNAPSHOT_DIR, exist_ok=True)
         df.to_csv(_icap_snapshot_path(d), index=False)
+        if push:
+            push_day_file(_icap_snapshot_path(d), ICAP_SNAPSHOT_DIR)
         return True
     except Exception:
         return False
@@ -1160,14 +1208,15 @@ def list_icap_snapshots():
 
 def ensure_todays_icap_snapshot() -> bool:
     """Capture the latest tpSEF page on EVERY app load, whatever date is
-    selected. Returns True if a new file was written."""
+    selected, and push it straight to the repo. Returns True if a new file
+    was written."""
     d = last_business_day()
     if os.path.exists(_icap_snapshot_path(d)):
         return False
     try:
         df, _ = fetch_source("ICAP", SOURCES["ICAP"]["url_template"], "icap", d.strftime("%Y%m%d"))
         if df is not None and not df.empty:
-            return save_icap_snapshot(df, d)
+            return save_icap_snapshot(df, d)   # save_icap_snapshot pushes too
     except Exception:
         pass
     return False
@@ -1177,7 +1226,7 @@ def get_icap_for_date(cfg: dict, sel_date: datetime):
     if sel_date.date() == last_business_day().date():
         df, err = fetch_source("ICAP", cfg["url_template"], "icap", sel_date.strftime("%Y%m%d"))
         if df is not None:
-            save_icap_snapshot(df, sel_date)
+            save_icap_snapshot(df, sel_date)   # saves AND pushes
             return df, None
         snap = load_icap_snapshot(sel_date)
         return (snap, None) if snap is not None else (None, err)
@@ -1212,12 +1261,14 @@ def gh_cfg():
     paste the same into the app's Secrets box on Streamlit Cloud:
 
         [github]
-        repo   = "nminniti7/Mexico-Desk"
+        repo   = "nminniti7/Mexico-Rates-FX"
         branch = "main"
         token  = "ghp_..."          # token needs contents: write
 
     If it's absent, the app just works off local disk. Best-effort: a failed
-    push or pull never interrupts anything on screen."""
+    push or pull never interrupts anything on screen — but the sidebar SAYS
+    when sync is off, because on Streamlit Cloud that means history dies on
+    the next redeploy."""
     try:
         s = st.secrets.get("github", {})
     except Exception:
@@ -1236,6 +1287,9 @@ def push_day_file(local_path: str, folder: str):
         return False
     ok, _ = github_push_file(local_path, c["repo"], c["branch"], c["token"],
                              f"{folder}/{os.path.basename(local_path)}")
+    if ok:
+        st.session_state.setdefault("gh_pushed", set()).add(
+            f"{folder}/{os.path.basename(local_path)}")
     return ok
 
 
@@ -1318,7 +1372,10 @@ def github_pull_dirs(repo, branch, token):
 
 
 def sync_with_github_once():
-    """Runs once per session: pull history down, capture today, push back up."""
+    """Runs once per session: pull history down, capture today, push back up.
+    MUST run before the sidebar renders — the sidebar counts snapshot files,
+    and counting them before the pull made a fresh container always claim
+    only one day was saved."""
     if st.session_state.get("gh_synced"):
         return
     st.session_state["gh_synced"] = True
@@ -1331,12 +1388,26 @@ def sync_with_github_once():
         github_push_dirs(cfg["repo"], cfg["branch"], cfg["token"], only_new=True)
 
 
+# Pull history from GitHub, capture today's ICAP + grid, push back — BEFORE
+# the sidebar renders, so the day counts and gap warnings are correct.
+sync_with_github_once()
+
 # ═════════════════════════════════════════════════════════════════════════
 # SIDEBAR
 # ═════════════════════════════════════════════════════════════════════════
 with st.sidebar:
     st.title("🇲🇽 Mexico Desk")
     st.caption("Cross-SEF market comparison")
+
+    _gh = gh_cfg()
+    if _gh["repo"] and _gh["token"]:
+        _pulled = st.session_state.get("gh_pulled", 0)
+        st.caption(f"☁️ GitHub sync **on** ({_gh['repo']})" +
+                   (f" · pulled {_pulled} file(s)" if _pulled else ""))
+    else:
+        st.warning("GitHub sync is **not configured** — snapshots live on this "
+                   "container's disk only and will be LOST on the next redeploy. "
+                   "Add the [github] block to Secrets.", icon="⚠️")
 
     # ── 1. Date ─────────────────────────────────────────────────────────
     st.subheader("1 · Trade date")
@@ -1427,6 +1498,7 @@ with st.sidebar:
         with c2:
             if st.button("↩️ Reset to default", use_container_width=True):
                 save_dv01_grid_for_date(DEFAULT_DV01_GRID, sel_date)
+                push_day_file(_dv01_path(sel_date), DV01_GRID_DIR)
                 st.rerun()
 
     saved_days = list_dv01_grid_dates()
@@ -1463,8 +1535,7 @@ with st.sidebar:
             try:
                 bdf = parse_icap_any(bf_file.read(), bf_file.name)
                 bdt = datetime.combine(bf_date, datetime.min.time())
-                if save_icap_snapshot(bdf, bdt):
-                    push_day_file(_icap_snapshot_path(bdt), ICAP_SNAPSHOT_DIR)
+                if save_icap_snapshot(bdf, bdt):   # saves AND pushes
                     st.success(f"Saved {len(bdf):,} rows for {bdt:%b %d}.")
                     st.rerun()
             except Exception as e:
@@ -1491,9 +1562,6 @@ with st.sidebar:
 
 
 numfmt = fmt_exact if show_exact else fmt_m
-
-# Pull history from GitHub, capture today's ICAP + grid, push back. Once per session.
-sync_with_github_once()
 
 # ═════════════════════════════════════════════════════════════════════════
 # HEADER
@@ -1530,7 +1598,8 @@ with st.expander("ℹ️ How this works (methodology, in one place)"):
         "use row count as a proxy and say so wherever it's shown.\n\n"
         "**History.** ICAP's page only ever shows the latest business day, so the app saves a "
         "snapshot every load (`icap_snapshots/icap_YYYYMMDD.csv`) and the DV01 grid the same way "
-        "(`dv01_grids/dv01_YYYYMMDD.csv`) — one file per day, never combined or appended."
+        "(`dv01_grids/dv01_YYYYMMDD.csv`) — one file per day, never combined or appended. Every "
+        "save is pushed straight to the GitHub repo so Streamlit Cloud redeploys can't lose it."
     )
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -1545,7 +1614,7 @@ with st.spinner("Pulling data from all connected SEFs..."):
                 status_msgs.append((name, "error", err))
             else:
                 if cfg["kind"] == "icap":
-                    save_icap_snapshot(df, sel_date)
+                    save_icap_snapshot(df, sel_date)   # saves AND pushes
                 all_data.append(df)
                 status_msgs.append((name, "ok", f"{len(df):,} rows (uploaded)"))
         elif cfg["kind"] == "icap":

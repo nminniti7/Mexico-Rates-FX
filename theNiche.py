@@ -3,51 +3,66 @@ Mexico Rates & FX Desk — Cross-SEF Market Comparison Dashboard
 =================================================================
 Tradition · LatAm SEF · GFI · BGC · ICAP (tpSEF)
 
-WHAT'S NEW IN THIS VERSION
--------------------------
-1. GFI/BGC 403 FIX (RE-APPLIED). requests and cloudscraper both send a
-   Python TLS fingerprint that the GFI/BGC WAF rejects with HTTP 403 no
-   matter what headers you fake. The fix is curl_cffi with Chrome browser
-   impersonation, which presents a real Chrome TLS fingerprint. Order is
-   now: curl_cffi → cloudscraper → warmed requests session. Add BOTH
-   `curl_cffi` and `cloudscraper` to requirements.txt or Streamlit Cloud
-   won't install them and you're back to 403.
-2. ICAP DATES NOW ACTUALLY SAVE. Two bugs, both fixed:
-   a) The GitHub sync ran AFTER the sidebar rendered, so the sidebar
-      counted snapshots before history was pulled down — a fresh container
-      always said "1 day saved" even when the repo had more. Sync now runs
-      FIRST, before anything renders.
-   b) Snapshots were saved to local disk but only pushed to GitHub in one
-      code path. Streamlit Cloud wipes local disk on every redeploy, so
-      any snapshot that missed the push was gone forever. Every save point
-      (daily auto-capture, today's fetch, sidebar upload, backfill) now
-      pushes its file to the repo immediately.
-   The sidebar also now says out loud whether GitHub sync is configured —
-   no more silent data loss.
-3. HISTORY IS REAL. Two things are persisted per day, one file per day,
-   never combined:
-       icap_snapshots/icap_YYYYMMDD.csv   — that day's ICAP table
-       dv01_grids/dv01_YYYYMMDD.csv       — that day's DV01 grid
-   Pick a past date and you get THAT day's ICAP data valued on THAT day's
-   grid. If a grid was never edited for a given day, the last saved grid is
-   carried forward (and if there's none, the built-in default) — always
-   labelled on screen so you know which you're looking at.
-4. GITHUB SYNC, SILENT. Streamlit Cloud wipes local disk on redeploy, so the
-   app PULLS saved history from the repo at startup and PUSHES new days back.
-   Config lives ONLY in .streamlit/secrets.toml under [github] — there's no
-   panel and nothing to type. No secrets = local disk only, everything else
-   still works (and the sidebar warns you).
-5. BACKFILL. tpSEF only ever shows the latest business day, so past ICAP days
-   can't be re-fetched — but you can upload an export and file it under
-   any date (sidebar → ICAP history → Backfill).
-6. NO FX CONVERSION ANYWHERE. Notional is whatever the source file says, in
-   the currency it was traded in, so it always ties to the raw file. Metrics
-   are DV01 and notional-as-published. One trades drill-down, not two.
-7. DV01 grid can be PASTED in whole (sidebar) — two columns out of Excel or
-   the desk email, '13x1' period notation and all.
+WHAT'S NEW IN THIS VERSION — SPEED
+----------------------------------
+The app was taking minutes to load on the Streamlit Cloud link. Four causes,
+all fixed here. Nothing about the numbers changed — only how fast they arrive.
+
+1. NO MORE FULL-REPO RE-PUSH ON EVERY SESSION. The old startup ran
+   github_push_dirs(only_new=True), but "only_new" was deduped against
+   st.session_state, which is EMPTY in every fresh session. So every visitor
+   triggered a GET (fetch sha) + PUT for every CSV in all three folders —
+   hundreds of sequential GitHub API round-trips before a single pixel
+   rendered, growing every day. It was also pointless: every save point
+   already pushes its own file the moment it's written. The bulk push is gone.
+
+2. PULL IS ONE API CALL + PARALLEL DOWNLOADS. It used to list each folder
+   separately, then download each missing file one at a time. Now: a single
+   recursive git-tree call lists the whole repo, and missing files download
+   8-at-a-time.
+
+3. DEAD DAYS ARE NEGATIVE-CACHED. Some sites (BGC especially) only keep a
+   rolling window of daily files online. A day that rolled off before it was
+   snapshotted can NEVER be fetched again — but MTD kept retrying it on every
+   rebuild, and each retry is curl_cffi → cloudscraper → requests with a
+   homepage warm-up each. Failures are now recorded in
+   sef_snapshots/_misses.json and skipped for the rest of the day, then
+   retried once tomorrow in case it was just the WAF in a mood.
+
+4. TIGHTER TIMEOUTS. These files either come back in ~2s or they don't come
+   back. 25–30s timeouts turned every dead day into a minute of dead air.
+   Now 8–10s.
+
+Also: month-to-date is now OFF by default (tick it in the sidebar). The day
+view paints immediately; MTD builds only when asked for.
+
+REQUIREMENTS.TXT — pin these, and DROP cloudscraper if curl_cffi is getting
+through (it's a chunky install for a fallback that never fires; the code
+skips it silently if it isn't installed):
+    streamlit
+    pandas
+    requests
+    openpyxl
+    beautifulsoup4
+    lxml
+    plotly
+    curl_cffi
+
+READ THIS IF YOU'RE ONLY USING THE SHARED LINK
+----------------------------------------------
+· The [github] secrets block MUST be set in the Streamlit Cloud app's Secrets
+  box. Without it, every snapshot dies on the next redeploy and history is
+  gone for good. The sidebar shouts at you if it isn't configured.
+· ICAP's page only ever shows the LATEST business day. The app snapshots it
+  on load — so SOMEONE HAS TO OPEN THE LINK ON A GIVEN BUSINESS DAY for that
+  day to be captured. If the link goes untouched for a week, that week of
+  ICAP is unrecoverable except by backfill upload. Opening it once a day is
+  enough; you don't need to run anything locally.
+· Tradition / LatAm / GFI / BGC keep their files online, so those backfill
+  themselves — but BGC's window is short, so same advice applies.
 
 Run:      streamlit run theNiche.py
-Install:  pip install streamlit pandas requests openpyxl beautifulsoup4 lxml plotly curl_cffi cloudscraper
+Install:  pip install streamlit pandas requests openpyxl beautifulsoup4 lxml plotly curl_cffi
 """
 
 import streamlit as st
@@ -56,8 +71,10 @@ import requests
 import re
 import io
 import os
+import json
 import base64
 import plotly.express as px
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Mexico Desk — Cross-SEF Dashboard", page_icon="🇲🇽", layout="wide")
@@ -105,6 +122,13 @@ SOURCES = {
         "date_fmt": None,       # no date in URL — page always shows latest business day
     },
 }
+
+# ── Timeouts. These files come back fast or not at all; long timeouts just
+# turn a dead day into a minute of dead air on the loading spinner.
+CONNECT_TIMEOUT = 6
+FETCH_TIMEOUT = 10       # data files
+WARM_TIMEOUT = 5         # homepage warm-up before a WAF-protected fetch
+GH_TIMEOUT = 15          # GitHub API
 
 
 def source_urls(cfg: dict, d: datetime) -> tuple:
@@ -173,6 +197,8 @@ DV01_GRID_DIR = "dv01_grids"
 LEGACY_DV01_FILE = "dv01_grid.csv"      # old single-grid file — still read as a fallback
 HISTORY_START = datetime(2026, 7, 9)    # first day the desk wanted history from
 
+MISS_FILE = os.path.join(SEF_SNAPSHOT_DIR, "_misses.json")   # negative cache (see below)
+
 DV01_GRID_BASE = 5000.0   # grid = MXN millions of notional per THIS many USD of DV01
 DEFAULT_DV01_GRID = {
     "1M": 11293.90, "2M": 5661.80, "3M": 3784.42, "4M": 2845.76,
@@ -184,7 +210,6 @@ DEFAULT_DV01_GRID = {
     "10Y": 126.22, "12Y": 113.51, "15Y": 101.47, "20Y": 90.64,
     "25Y": 84.89, "30Y": 81.50,
 }
-
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -1072,7 +1097,7 @@ def _make_session(homepage: str) -> requests.Session:
     s = requests.Session()
     s.headers.update(BROWSER_HEADERS)
     try:
-        s.get(homepage, timeout=15)
+        s.get(homepage, timeout=WARM_TIMEOUT)
         s.headers["Referer"] = homepage
     except Exception:
         pass
@@ -1086,7 +1111,8 @@ def _fetch_protected(url: str, homepage: str):
     a browser's. THE FIX: curl_cffi with Chrome impersonation presents a real
     Chrome TLS fingerprint and gets through. Order:
         1. curl_cffi (impersonate='chrome') — the one that actually works
-        2. cloudscraper — solves plain-Cloudflare challenges
+        2. cloudscraper — only if it happens to be installed (safe to drop
+           from requirements.txt; the import just fails and we move on)
         3. warmed requests session — last resort
     curl_cffi MUST be in requirements.txt for this to work on Streamlit Cloud."""
     last_r = None
@@ -1096,26 +1122,26 @@ def _fetch_protected(url: str, homepage: str):
         from curl_cffi import requests as creq
         s = creq.Session(impersonate="chrome")
         try:
-            s.get(homepage, timeout=15)
+            s.get(homepage, timeout=WARM_TIMEOUT)
         except Exception:
             pass
-        r = s.get(url, headers={"Referer": homepage}, timeout=30)
+        r = s.get(url, headers={"Referer": homepage}, timeout=FETCH_TIMEOUT)
         if r.status_code == 200:
             return r
         last_r = r
     except Exception:
         pass
 
-    # 2 — cloudscraper
+    # 2 — cloudscraper (optional)
     try:
         import cloudscraper
         scraper = cloudscraper.create_scraper(
             browser={"browser": "chrome", "platform": "darwin", "mobile": False})
         try:
-            scraper.get(homepage, timeout=15)
+            scraper.get(homepage, timeout=WARM_TIMEOUT)
         except Exception:
             pass
-        r = scraper.get(url, timeout=30)
+        r = scraper.get(url, timeout=FETCH_TIMEOUT)
         if r.status_code == 200:
             return r
         if last_r is None:
@@ -1124,7 +1150,7 @@ def _fetch_protected(url: str, homepage: str):
         pass
 
     # 3 — warmed plain-requests session
-    r = _make_session(homepage).get(url, timeout=25)
+    r = _make_session(homepage).get(url, timeout=FETCH_TIMEOUT)
     return r if r.status_code == 200 else (last_r if last_r is not None else r)
 
 
@@ -1151,7 +1177,8 @@ def fetch_source(sef_name: str, urls, kind: str, report_date_str: str):
     for url in urls:
         # 1 — plain direct request (this is all the desk's links need)
         try:
-            resp = requests.get(url, headers=BROWSER_HEADERS, timeout=25, allow_redirects=True)
+            resp = requests.get(url, headers=BROWSER_HEADERS,
+                                timeout=(CONNECT_TIMEOUT, FETCH_TIMEOUT), allow_redirects=True)
         except Exception as e:
             resp, last_err = None, f"Network error: {e}"
         if resp is not None and resp.status_code == 200 and _looks_valid(kind, resp):
@@ -1215,13 +1242,44 @@ def fetch_source_hist(sef_name: str, urls, kind: str, report_date_str: str):
     """Cached ONLY on success. This function raises on failure, and
     st.cache_data doesn't cache exceptions — so a day that fails (WAF mood,
     transient timeout) is retried on the next run instead of the failure
-    being frozen in cache for 24 hours. That freezing is exactly how a BGC
-    day that failed ONCE kept showing as missing all day even after the
-    fetch problem was fixed."""
+    being frozen in cache for 24 hours.
+
+    The catch: a day that's PERMANENTLY gone (rolled off BGC's rolling window)
+    would then be retried forever, and each retry costs the full anti-bot
+    chain. That's what the on-disk miss log below is for — see _record_miss."""
     df, err = fetch_source(sef_name, urls, kind, report_date_str)
     if df is None:
         raise RuntimeError(err or "fetch failed")
     return df
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# NEGATIVE CACHE — don't re-hammer days that aren't coming back
+# ═════════════════════════════════════════════════════════════════════════
+def _load_misses() -> dict:
+    try:
+        with open(MISS_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _record_miss(key: str):
+    """key = 'BGC_20260702'. Value = the date we last tried. Retried once per
+    day — a WAF block is transient, a rolled-off file isn't, and we can't tell
+    them apart, so one attempt a day is the compromise."""
+    try:
+        m = _load_misses()
+        m[key] = datetime.today().strftime("%Y%m%d")
+        os.makedirs(SEF_SNAPSHOT_DIR, exist_ok=True)
+        with open(MISS_FILE, "w") as f:
+            json.dump(m, f)
+    except Exception:
+        pass
+
+
+def _tried_today(key: str, misses: dict) -> bool:
+    return misses.get(key) == datetime.today().strftime("%Y%m%d")
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -1276,7 +1334,11 @@ def list_icap_snapshots():
 def ensure_todays_icap_snapshot() -> bool:
     """Capture the latest tpSEF page on EVERY app load, whatever date is
     selected, and push it straight to the repo. Returns True if a new file
-    was written."""
+    was written.
+
+    NOTE FOR THE SHARED LINK: this only runs when someone OPENS the app. If
+    nobody opens it on a business day, that day's ICAP is never captured and
+    tpSEF won't serve it again. One visit a day is all it takes."""
     d = last_business_day()
     if os.path.exists(_icap_snapshot_path(d)):
         return False
@@ -1291,12 +1353,14 @@ def ensure_todays_icap_snapshot() -> bool:
 
 def get_icap_for_date(cfg: dict, sel_date: datetime):
     if sel_date.date() == last_business_day().date():
+        snap = load_icap_snapshot(sel_date)
+        if snap is not None:
+            return snap, None                  # already captured this load — don't re-fetch
         df, err = fetch_source("ICAP", source_urls(cfg, sel_date), "icap", sel_date.strftime("%Y%m%d"))
         if df is not None:
             save_icap_snapshot(df, sel_date)   # saves AND pushes
             return df, None
-        snap = load_icap_snapshot(sel_date)
-        return (snap, None) if snap is not None else (None, err)
+        return None, err
     snap = load_icap_snapshot(sel_date)
     if snap is not None:
         return snap, None
@@ -1357,7 +1421,7 @@ def missing_history_days(since: datetime = HISTORY_START):
 
 
 # ═════════════════════════════════════════════════════════════════════════
-# GITHUB SYNC — pull at startup, push new days (survives Cloud redeploys)
+# GITHUB SYNC — pull at startup, push each new day-file as it's written
 # ═════════════════════════════════════════════════════════════════════════
 SYNC_DIRS = [ICAP_SNAPSHOT_DIR, SEF_SNAPSHOT_DIR, DV01_GRID_DIR]
 
@@ -1366,26 +1430,21 @@ def gh_cfg():
     """Config comes from .streamlit/secrets.toml, with environment variables
     as a fallback (GH_REPO / GH_BRANCH / GH_TOKEN).
 
-    ON STREAMLIT CLOUD: paste the [github] block into the app's Secrets box.
+    ON STREAMLIT CLOUD (this is the one that matters): paste the [github]
+    block into the app's Secrets box —
 
-    ON LOCALHOST: secrets don't follow you from the cloud — create the file
-    yourself, in the SAME folder you run `streamlit run theNiche.py` from:
+        [github]
+        repo   = "nminniti7/Mexico-Rates-FX"
+        branch = "main"
+        token  = "github_pat_..."
 
-        mkdir -p .streamlit
-        # then create .streamlit/secrets.toml containing:
-        #   [github]
-        #   repo   = "nminniti7/Mexico-Rates-FX"
-        #   branch = "main"
-        #   token  = "github_pat_..."
+    Without it the app still WORKS, but every snapshot lives on the
+    container's disk and dies on the next redeploy — and ICAP days can't be
+    re-fetched, so that history is gone for good. The sidebar warns loudly.
 
-    and add `.streamlit/secrets.toml` to .gitignore so the token is never
-    committed (GitHub auto-revokes any token it finds in a push, which kills
-    sync everywhere). Restart streamlit after creating the file.
-
-    If it's absent everywhere, the app just works off local disk. Best-effort:
-    a failed push or pull never interrupts anything on screen — but the
-    sidebar SAYS when sync is off, because on Streamlit Cloud that means
-    history dies on the next redeploy."""
+    ON LOCALHOST: create .streamlit/secrets.toml in the folder you run from,
+    and add it to .gitignore (GitHub auto-revokes any token it finds in a
+    push, which would kill sync everywhere)."""
     try:
         s = st.secrets.get("github", {})
     except Exception:
@@ -1397,15 +1456,17 @@ def gh_cfg():
 
 
 def push_day_file(local_path: str, folder: str):
-    """Best-effort push of one day-file. Silent no-op if GitHub isn't set up."""
+    """Best-effort push of ONE day-file, the moment it's written. This is the
+    only push path in the app — there is deliberately no bulk 'push
+    everything' sweep at startup anymore. The old one re-uploaded the entire
+    repo on every fresh session (session_state, which it deduped against, is
+    empty in a new session) and was the single biggest reason the shared link
+    took minutes to load."""
     c = gh_cfg()
     if not (c["repo"] and c["token"] and os.path.exists(local_path)):
         return False
     ok, _ = github_push_file(local_path, c["repo"], c["branch"], c["token"],
                              f"{folder}/{os.path.basename(local_path)}")
-    if ok:
-        st.session_state.setdefault("gh_pushed", set()).add(
-            f"{folder}/{os.path.basename(local_path)}")
     return ok
 
 
@@ -1424,14 +1485,15 @@ def github_push_file(local_path, repo, branch, token, remote_path):
         with open(local_path, "rb") as f:
             content_b64 = base64.b64encode(f.read()).decode()
         sha = None
-        r = requests.get(api_url, headers=_gh_headers(token), params={"ref": branch}, timeout=15)
+        r = requests.get(api_url, headers=_gh_headers(token), params={"ref": branch},
+                         timeout=GH_TIMEOUT)
         if r.status_code == 200:
             sha = r.json().get("sha")
         payload = {"message": f"Update {os.path.basename(local_path)}",
                    "content": content_b64, "branch": branch}
         if sha:
             payload["sha"] = sha
-        r = requests.put(api_url, headers=_gh_headers(token), json=payload, timeout=20)
+        r = requests.put(api_url, headers=_gh_headers(token), json=payload, timeout=GH_TIMEOUT)
         if r.status_code in (200, 201):
             return True, "OK"
         return False, f"HTTP {r.status_code}: {r.text[:160]}"
@@ -1439,57 +1501,60 @@ def github_push_file(local_path, repo, branch, token, remote_path):
         return False, str(e)
 
 
-def github_push_dirs(repo, branch, token, only_new=False):
-    ok = fail = 0
-    for d in SYNC_DIRS:
-        if not os.path.isdir(d):
-            continue
-        for fn in sorted(os.listdir(d)):
-            if not fn.endswith(".csv"):
-                continue
-            key = f"{d}/{fn}"
-            if only_new and key in st.session_state.get("gh_pushed", set()):
-                continue
-            success, _ = github_push_file(os.path.join(d, fn), repo, branch, token, key)
-            if success:
-                ok += 1
-                st.session_state.setdefault("gh_pushed", set()).add(key)
-            else:
-                fail += 1
-    return ok, fail
-
-
 def github_pull_dirs(repo, branch, token):
-    """Download any day-files in the repo that aren't on local disk. This is
-    what makes the shared Streamlit link show the full history after a
-    redeploy wipes the container's disk."""
-    pulled = 0
+    """Download any day-files in the repo that aren't on local disk — this is
+    what makes the shared link show full history after a redeploy wipes the
+    container.
+
+    ONE recursive git-tree call lists the whole repo, then missing files
+    download 8-at-a-time. The old version made a separate API call per folder
+    and then downloaded files one after another, which is why startup got
+    slower every single day the history grew."""
+    try:
+        r = requests.get(f"https://api.github.com/repos/{repo}/git/trees/{branch}",
+                         headers=_gh_headers(token), params={"recursive": "1"},
+                         timeout=GH_TIMEOUT)
+        if r.status_code != 200:
+            return 0
+        tree = r.json().get("tree", [])
+    except Exception:
+        return 0
+
+    todo = [t["path"] for t in tree
+            if t.get("type") == "blob"
+            and t["path"].endswith(".csv")
+            and t["path"].split("/")[0] in SYNC_DIRS
+            and not os.path.exists(t["path"])]
+    if not todo:
+        return 0
     for d in SYNC_DIRS:
-        api_url = f"https://api.github.com/repos/{repo}/contents/{d}"
+        os.makedirs(d, exist_ok=True)
+
+    # Accept: raw gives us the file bytes straight from the contents endpoint,
+    # so it's one request per file instead of metadata-then-download_url.
+    hdrs = {**_gh_headers(token), "Accept": "application/vnd.github.raw"}
+
+    def _get(path):
         try:
-            r = requests.get(api_url, headers=_gh_headers(token), params={"ref": branch}, timeout=20)
-            if r.status_code != 200:
-                continue
-            os.makedirs(d, exist_ok=True)
-            for item in r.json():
-                if item.get("type") != "file" or not item.get("name", "").endswith(".csv"):
-                    continue
-                local = os.path.join(d, item["name"])
-                if os.path.exists(local):
-                    continue
-                raw = requests.get(item["download_url"], headers=_gh_headers(token), timeout=20)
-                if raw.status_code == 200:
-                    with open(local, "wb") as f:
-                        f.write(raw.content)
-                    pulled += 1
+            raw = requests.get(f"https://api.github.com/repos/{repo}/contents/{path}",
+                               headers=hdrs, params={"ref": branch}, timeout=GH_TIMEOUT)
+            if raw.status_code == 200:
+                with open(path, "wb") as f:
+                    f.write(raw.content)
+                return 1
         except Exception:
-            continue
-    return pulled
+            pass
+        return 0
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        return sum(ex.map(_get, todo))
 
 
 def sync_with_github_once():
-    """Runs once per session: pull history down, capture today, push back up.
-    MUST run before the sidebar renders — the sidebar counts snapshot files,
+    """Runs once per session: pull history down, capture today's ICAP + grid
+    (both of which push themselves). No bulk push — see push_day_file.
+
+    MUST run before the sidebar renders: the sidebar counts snapshot files,
     and counting them before the pull made a fresh container always claim
     only one day was saved."""
     if st.session_state.get("gh_synced"):
@@ -1500,13 +1565,12 @@ def sync_with_github_once():
         st.session_state["gh_pulled"] = github_pull_dirs(cfg["repo"], cfg["branch"], cfg["token"])
     ensure_todays_icap_snapshot()
     ensure_todays_dv01_grid()
-    if cfg["repo"] and cfg["token"]:
-        github_push_dirs(cfg["repo"], cfg["branch"], cfg["token"], only_new=True)
 
 
-# Pull history from GitHub, capture today's ICAP + grid, push back — BEFORE
-# the sidebar renders, so the day counts and gap warnings are correct.
-sync_with_github_once()
+# Pull history from GitHub, capture today's ICAP + grid — BEFORE the sidebar
+# renders, so the day counts and gap warnings are correct.
+with st.spinner("Loading saved history..."):
+    sync_with_github_once()
 
 # ═════════════════════════════════════════════════════════════════════════
 # SIDEBAR
@@ -1545,8 +1609,11 @@ with st.sidebar:
               "in. Nothing is FX-converted anywhere in this app."),
     )
     show_exact = st.checkbox("Exact numbers (not 1.23M)", value=False)
-    show_mtd = st.checkbox("Month-to-date share", value=True,
-                           help="Pulls every prior business day this month. First load is slower.")
+    # OFF by default now — the day view paints instantly and MTD is opt-in.
+    # It was the slowest thing on the page and most loads don't need it.
+    show_mtd = st.checkbox("Month-to-date share", value=False,
+                           help="Pulls every prior business day this month. Slower on first "
+                                "load, then cached — days already saved are read from disk.")
 
     # ── 3. DV01 grid (per day) ──────────────────────────────────────────
     st.subheader("3 · DV01 grid")
@@ -1713,9 +1780,12 @@ with st.expander("ℹ️ How this works (methodology, in one place)"):
         "**Trade counts.** Tradition and ICAP publish a real count. LatAm, GFI and BGC don't — those "
         "use row count as a proxy and say so wherever it's shown.\n\n"
         "**History.** ICAP's page only ever shows the latest business day, so the app saves a "
-        "snapshot every load (`icap_snapshots/icap_YYYYMMDD.csv`) and the DV01 grid the same way "
-        "(`dv01_grids/dv01_YYYYMMDD.csv`) — one file per day, never combined or appended. Every "
-        "save is pushed straight to the GitHub repo so Streamlit Cloud redeploys can't lose it."
+        "snapshot every load (`icap_snapshots/icap_YYYYMMDD.csv`), the other four SEFs the same "
+        "way (`sef_snapshots/`) and the DV01 grid the same way (`dv01_grids/dv01_YYYYMMDD.csv`) — "
+        "one file per day, never combined or appended. Every save is pushed straight to the GitHub "
+        "repo the moment it's written, so Streamlit Cloud redeploys can't lose it. **Because ICAP "
+        "is captured on page load, someone has to open the app on a given business day for that "
+        "day to be saved.**"
     )
     _missing = st.session_state.get("mtd_missing", [])
     if _missing:
@@ -1724,10 +1794,11 @@ with st.expander("ℹ️ How this works (methodology, in one place)"):
             "**Month-to-date gaps.** These source-days aren't in the MTD pies: **" +
             "** · **".join(_missing) + "**. They weren't saved and are no longer fetchable "
             "(BGC and tpSEF only keep the most recent days online, so a day that rolls off "
-            "before it's snapshotted is gone from the site). The app retries these on every "
-            "load and saves every day it sees going forward. To fill one in now: pick that "
-            "date in the sidebar and upload the day's file under Sources → Upload — it saves "
-            "to the repo permanently and the MTD pies update immediately.")
+            "before it's snapshotted is gone from the site). They're retried once a day, not "
+            "on every load — retrying a permanently-dead day on every rebuild is what made "
+            "this page crawl. To fill one in: pick that date in the sidebar and upload the "
+            "day's file under Sources → Upload — it saves to the repo permanently and the MTD "
+            "pies update immediately.")
 
 # ═════════════════════════════════════════════════════════════════════════
 # FETCH ALL SOURCES
@@ -1754,17 +1825,16 @@ with st.spinner("Pulling data from all connected SEFs..."):
                 all_data.append(df)
                 status_msgs.append((name, "ok", f"{len(df):,} rows"))
         else:
+            # Saved snapshot FIRST — a day already on disk is never re-fetched.
+            snap = load_sef_snapshot(name, sel_date)
+            if snap is not None:
+                all_data.append(snap)
+                status_msgs.append((name, "ok", f"{len(snap):,} rows (saved)"))
+                continue
             df, err = fetch_source(name, source_urls(cfg, sel_date), cfg["kind"],
                                    sel_date.strftime("%Y%m%d"))
             if err:
-                # A fetch can fail on Cloud (WAF) even when the day was saved
-                # before — fall back to the saved snapshot instead of a blank.
-                snap = load_sef_snapshot(name, sel_date)
-                if snap is not None:
-                    all_data.append(snap)
-                    status_msgs.append((name, "ok", f"{len(snap):,} rows (saved snapshot)"))
-                else:
-                    status_msgs.append((name, "error", err))
+                status_msgs.append((name, "error", err))
             else:
                 save_sef_snapshot(df, name, sel_date)
                 all_data.append(df)
@@ -2054,24 +2124,30 @@ def _snapshot_sig() -> str:
     names = []
     for d in (ICAP_SNAPSHOT_DIR, SEF_SNAPSHOT_DIR):
         if os.path.isdir(d):
-            names.extend(sorted(os.listdir(d)))
+            # .csv only — _misses.json lives in here too and changing it
+            # shouldn't by itself invalidate the MTD cache (miss_sig does that).
+            names.extend(sorted(f for f in os.listdir(d) if f.endswith(".csv")))
     return str(hash(tuple(names)))
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
-def build_mtd_data(sel_date_str: str, grid_sig: str, snap_sig: str):
+def build_mtd_data(sel_date_str: str, grid_sig: str, snap_sig: str, miss_sig: str):
     """Returns (dataframe, missing) where missing lists every SEF-day that
-    couldn't be loaded — nothing fails silently anymore.
+    couldn't be loaded — nothing fails silently.
 
     Snapshot-first: each day's parsed table is saved to sef_snapshots/ the
     first time it's seen and pushed to the repo, so MTD reads from disk and
-    only fetches genuine gaps. Failed fetches are NOT cached (see
-    fetch_source_hist) — they retry on every rebuild. But note: some sites
+    only fetches genuine gaps.
+
+    Miss-aware: a day that failed today is not retried again today. Some sites
     only keep a rolling window of recent daily files online (BGC's daily
     activity directory has been 'most recent weeks only' for years), so a day
     that rolled off before it was ever snapshotted can ONLY come back via
-    backfill upload."""
+    backfill upload — retrying it on every rebuild, at ~3 anti-bot round-trips
+    a go, was pure dead time. Tomorrow it gets one more chance, in case the
+    failure was just the WAF."""
     sel = datetime.strptime(sel_date_str, "%Y%m%d")
+    misses = _load_misses()
     frames, missing = [], []
     for d in _business_days_of_month(sel):
         ds = d.strftime("%Y%m%d")
@@ -2084,16 +2160,24 @@ def build_mtd_data(sel_date_str: str, grid_sig: str, snap_sig: str):
                 else:
                     missing.append(f"ICAP {d:%b %d}")
                 continue
+
             snap = load_sef_snapshot(name, d)
             if snap is not None:
                 day_frames.append(snap)
+                continue
+
+            key = f"{name}_{ds}"
+            if _tried_today(key, misses):
+                missing.append(f"{name} {d:%b %d}")
                 continue
             try:
                 df = fetch_source_hist(name, source_urls(cfg, d), cfg["kind"], ds)
                 save_sef_snapshot(df, name, d)
                 day_frames.append(df)
             except Exception:
+                _record_miss(key)
                 missing.append(f"{name} {d:%b %d}")
+
         if not day_frames:
             continue
         day = pd.concat(day_frames, ignore_index=True)
@@ -2114,8 +2198,9 @@ if show_mtd:
     with st.spinner("Building month-to-date view (cached after first load)..."):
         try:
             grid_sig = str(sorted(dv01_grid.items()))
+            miss_sig = str(sorted(_load_misses().items()))
             mtd_data, mtd_missing = build_mtd_data(sel_date.strftime("%Y%m%d"), grid_sig,
-                                                   _snapshot_sig())
+                                                   _snapshot_sig(), miss_sig)
             # Surfaced only inside the "How this works" panel, not as a banner.
             st.session_state["mtd_missing"] = mtd_missing
         except Exception as e:

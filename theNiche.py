@@ -1212,7 +1212,16 @@ def fetch_uploaded(sef_name: str, kind: str, uploaded_file, report_date: datetim
 
 @st.cache_data(ttl=86400, show_spinner=False, max_entries=400)
 def fetch_source_hist(sef_name: str, urls, kind: str, report_date_str: str):
-    return fetch_source(sef_name, urls, kind, report_date_str)
+    """Cached ONLY on success. This function raises on failure, and
+    st.cache_data doesn't cache exceptions — so a day that fails (WAF mood,
+    transient timeout) is retried on the next run instead of the failure
+    being frozen in cache for 24 hours. That freezing is exactly how a BGC
+    day that failed ONCE kept showing as missing all day even after the
+    fetch problem was fixed."""
+    df, err = fetch_source(sef_name, urls, kind, report_date_str)
+    if df is None:
+        raise RuntimeError(err or "fetch failed")
+    return df
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -2011,27 +2020,46 @@ def render_section(data, category_label, sefs_present, group_label, mtd_data=Non
 # ═════════════════════════════════════════════════════════════════════════
 # MONTH-TO-DATE (each day valued on THAT day's grid)
 # ═════════════════════════════════════════════════════════════════════════
+# Full US market holidays — no SEF publishes a file on these, so MTD skips
+# them instead of flagging them missing. (Jul 4, 2026 falls on a Saturday, so
+# it was observed Friday Jul 3.) Extend as needed.
+MARKET_HOLIDAYS = {"20260101", "20260119", "20260216", "20260403", "20260525",
+                   "20260619", "20260703", "20260907", "20261126", "20261225"}
+
+
 def _business_days_of_month(sel: datetime):
     d, days = sel.replace(day=1), []
     while d.date() <= sel.date():
-        if d.weekday() < 5:
+        if d.weekday() < 5 and d.strftime("%Y%m%d") not in MARKET_HOLIDAYS:
             days.append(d)
         d += timedelta(days=1)
     return days
 
 
+def _snapshot_sig() -> str:
+    """Fingerprint of every saved day-file. Part of the MTD cache key, so the
+    moment a backfill or a new snapshot lands, the MTD view rebuilds instead
+    of serving a stale 'missing' list for up to 30 minutes."""
+    names = []
+    for d in (ICAP_SNAPSHOT_DIR, SEF_SNAPSHOT_DIR):
+        if os.path.isdir(d):
+            names.extend(sorted(os.listdir(d)))
+    return str(hash(tuple(names)))
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
-def build_mtd_data(sel_date_str: str, grid_sig: str):
+def build_mtd_data(sel_date_str: str, grid_sig: str, snap_sig: str):
     """Returns (dataframe, missing) where missing lists every SEF-day that
     couldn't be loaded — nothing fails silently anymore.
 
     Snapshot-first: each day's parsed table is saved to sef_snapshots/ the
     first time it's seen and pushed to the repo, so MTD reads from disk and
-    only fetches genuine gaps. This is why GFI/BGC were vanishing from the
-    MTD pies on the Streamlit Cloud version: their WAF blocks a burst of
-    8+ back-to-back requests from a datacenter IP, every historical fetch
-    got a 403, and the old code swallowed the error. Fetching each day ONCE
-    ever (and never again) both avoids the burst and survives redeploys."""
+    only fetches genuine gaps. Failed fetches are NOT cached (see
+    fetch_source_hist) — they retry on every rebuild. But note: some sites
+    only keep a rolling window of recent daily files online (BGC's daily
+    activity directory has been 'most recent weeks only' for years), so a day
+    that rolled off before it was ever snapshotted can ONLY come back via
+    backfill upload."""
     sel = datetime.strptime(sel_date_str, "%Y%m%d")
     frames, missing = [], []
     for d in _business_days_of_month(sel):
@@ -2049,11 +2077,11 @@ def build_mtd_data(sel_date_str: str, grid_sig: str):
             if snap is not None:
                 day_frames.append(snap)
                 continue
-            df, _ = fetch_source_hist(name, source_urls(cfg, d), cfg["kind"], ds)
-            if df is not None:
+            try:
+                df = fetch_source_hist(name, source_urls(cfg, d), cfg["kind"], ds)
                 save_sef_snapshot(df, name, d)
                 day_frames.append(df)
-            else:
+            except Exception:
                 missing.append(f"{name} {d:%b %d}")
         if not day_frames:
             continue
@@ -2075,14 +2103,17 @@ if show_mtd:
     with st.spinner("Building month-to-date view (cached after first load)..."):
         try:
             grid_sig = str(sorted(dv01_grid.items()))
-            mtd_data, mtd_missing = build_mtd_data(sel_date.strftime("%Y%m%d"), grid_sig)
+            mtd_data, mtd_missing = build_mtd_data(sel_date.strftime("%Y%m%d"), grid_sig,
+                                                   _snapshot_sig())
             if mtd_missing:
                 st.warning("MTD is missing: " + " · ".join(mtd_missing) +
-                           " — those source-days couldn't be fetched or found in saved "
-                           "snapshots, so their volume is absent from the MTD pies. "
-                           "Loading the app on each day going forward saves that day "
-                           "permanently; a missed GFI/BGC day can be backfilled by "
-                           "uploading its xlsx in Sources → Upload with that date picked.",
+                           " — not saved and no longer fetchable (BGC and tpSEF only keep "
+                           "the most recent days online, so a day that rolls off before "
+                           "it's snapshotted is gone from the site). The app retries these "
+                           "on every load and saves every day it sees going forward. To "
+                           "fill one in now: pick that date in the sidebar and upload the "
+                           "day's file under Sources → Upload — it saves to the repo "
+                           "permanently and the MTD pies update immediately.",
                            icon="⚠️")
         except Exception as e:
             st.caption(f"Month-to-date view unavailable: {e}")

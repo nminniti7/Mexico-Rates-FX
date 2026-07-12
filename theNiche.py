@@ -1,108 +1,39 @@
 """
 Mexico Rates & FX Desk — Cross-SEF Market Comparison Dashboard
 =================================================================
-Compares Tradition, LatAm SEF, GFI, BGC, and ICAP (tpSEF) daily activity
-for MXN (and USD) TIIE swaps and FX products.
+Tradition · LatAm SEF · GFI · BGC · ICAP (tpSEF)
 
-WHAT CHANGED IN THIS VERSION (desk feedback)
---------------------------------------------------------------------------
-1. Mexico products ONLY — the Non-Mexico and All-Products tabs are gone.
-2. Individual-trades drill-down now lives INSIDE each tab and is filtered
-   to that tab's category: the IRS tab shows only IRS trades, the FX tab
-   only FX trades.
-3. IRS tenor ladder restricted to the desk's standard points: 1M, 2M, 3M,
-   6M, 9M, 1Y-10Y, 12Y, 15Y, 20Y, 25Y, 30Y. Anything traded at another
-   tenor rolls into one 'Other / non-standard tenor' row so totals still
-   reconcile. Tenors with no trades that day are hidden (both tabs).
-4. DV01 is the default comparison metric: DV01 (USD) ≈ USD notional ×
-   tenor in years × 1bp — a flat-annuity approximation (no discounting)
-   that normalizes volume across the curve. Rates products only; the FX
-   tab automatically falls back to USD notional. Rows with no parseable
-   single tenor (spread trades) get no DV01 and are flagged.
-5. Month-to-date market share: pulls every business day of the month up
-   to the selected date (cached 24h after first load) and shows an MTD
-   share pie next to the daily one, converted with each day's ECB fixing.
-6. ICAP daily snapshots: the tpSEF page has no date in its URL and only
-   ever shows the latest business day, so each day the app saves that
-   day's parsed ICAP table to disk (icap_snapshots/). Selecting a past
-   date then loads the saved snapshot — accurate ICAP history from the
-   first day the app ran. NOTE: on Streamlit Community Cloud the disk is
-   wiped on redeploy/reboot; snapshots are fully durable on a local
-   machine.
+WHAT'S NEW IN THIS VERSION
+-------------------------
+1. CRASH FIX — the page died on `sorted(...)` whenever a source file had a
+   blank currency cell (pandas reads it back as float NaN, and you can't
+   sort a float against a string). Every sort/unique in the app now goes
+   through safe_sorted(), which coerces to str first. Nothing else was
+   changing the data — this alone is why nothing rendered.
+2. HISTORY IS NOW REAL. Two things are persisted per day, one file per day,
+   never combined:
+       icap_snapshots/icap_YYYYMMDD.csv   — that day's ICAP table
+       dv01_grids/dv01_YYYYMMDD.csv       — that day's DV01 grid
+   Pick a past date and you get THAT day's ICAP data valued on THAT day's
+   grid. If a grid was never edited for a given day, the last saved grid is
+   carried forward (and if there's none, the built-in default) — always
+   labelled on screen so you know which you're looking at.
+3. GITHUB SYNC, SILENT. Streamlit Cloud wipes local disk on redeploy, so the
+   app PULLS saved history from the repo at startup and PUSHES new days back.
+   Config lives ONLY in .streamlit/secrets.toml under [github] — there's no
+   panel and nothing to type. No secrets = local disk only, everything else
+   still works.
+4. BACKFILL. tpSEF only ever shows the latest business day, so past ICAP days
+   can't be re-fetched — but you can now upload an export and file it under
+   any date (sidebar → ICAP history → Backfill).
+5. NO FX CONVERSION ANYWHERE. Notional is whatever the source file says, in
+   the currency it was traded in, so it always ties to the raw file. Metrics
+   are DV01 and notional-as-published. One trades drill-down, not two.
+6. DV01 grid can be PASTED in whole (sidebar) — two columns out of Excel or
+   the desk email, '13x1' period notation and all.
 
-PREVIOUS VERSION (Tradition FX option notionals — still in effect)
---------------------------------------------------------------------------
-Tradition's parser now reads the _NDA (Non-Delta-Adjusted, i.e. GROSS)
-notional columns instead of the _DA (Delta-Adjusted) columns. Two reasons:
-  1. Comparability — every other SEF here (LatAm, GFI, BGC, ICAP) reports
-     gross notional; summing Tradition's delta-adjusted figure against
-     those overstates Tradition's FX share.
-  2. Tradition's DA column applies the delta as a WHOLE NUMBER (a 50-delta
-     option on 10M shows 500M = 10M x 50, not 10M x 0.50), so DA is
-     10-50x gross and 100x the true delta-adjusted figure. Verified on
-     2026-07-09: strike-quoted options have DA == NDA exactly; every
-     'delta of X' option has DA == NDA * X.
-For swaps and NDFs, DA == NDA in every row, so this ONLY changes FX
-option rows. The raw file is never modified — we just read the column
-that means gross notional. (Mexico FX on 2026-07-09: 9.64B -> 594M.)
-
-PREVIOUS VERSION (classification / 0M bucket / asset codes — still in effect)
---------------------------------------------------------------------------
-1. FX options are now classified correctly. Descriptions like
-       '1W USD vs. MXN Put at a delta of 50'
-   were falling into "Other" because (a) Tradition was classified off the
-   Sub_Prod column ALONE, and (b) the classifier didn't recognize option
-   language. Fixes:
-     - Tradition is now classified off Sub_Prod + description COMBINED.
-     - The classifier recognizes a currency pair (USD vs. MXN, USDMXN,
-       EUR/MXN...) combined with option markers (PUT, CALL, DELTA, RISK
-       REVERSAL, BUTTERFLY, STRADDLE, STRANGLE, SEAGULL, DIGITAL, OPTION)
-       and buckets those as FX.
-
-2. 0M tenor bucket. ON/TN/SN, day tenors, and 1W/2W/3W now all roll up
-   into a single "0M" row at the TOP of the comparison ladder — so
-   sub-month FX trades are never dropped from the summary tables. The
-   drill-down still shows the TRUE tenor (1W, 2W, ...) for each trade.
-
-3. Nothing silently excluded. The comparison table now also carries a
-   final "Other / unmatched" row, so its Total column reconciles EXACTLY
-   with the market-share chart. A built-in reconciliation check warns on
-   screen if the table total and the chart total ever disagree.
-
-4. Asset-class codes. Every row now carries the raw regulatory asset
-   class (IR / CU / CD) — taken directly from the source where published
-   (GFI, BGC, ICAP) and derived from the product category otherwise.
-   Shown ONLY in the individual-trades drill-down; the main tabs you
-   switch between remain "IRS / Swap" and "FX".
-
-PREVIOUS VERSION (accuracy / FX / layout rework — still in effect)
---------------------------------------------------------------------------
-- Real FX conversion: Currency | Notional_Local | USD_Notional_Computed,
-  using the ECB daily reference rate (via Frankfurter.app) for the report
-  date. CLP/COP/PEN have no ECB fixing — manual sidebar entry, never
-  silently estimated.
-- Auditability: FX_Rate_Used / FX_Source per row, plus a cross-check
-  against sources that publish their own USD figure (Tradition, LatAm),
-  flagging any >1% disagreement.
-- Mexico vs. Non-Mexico tabs off the MXN_Match flag (currency field OR
-  TIIE/F-TIIE/UDI/MXN markers in the description).
-- Exact numbers by default (toggle for 1.23M abbreviations).
-
-WHY EACH SOURCE IS HANDLED DIFFERENTLY (parsing)
---------------------------------------------------------------------------
-  - Tradition : pipe-delimited CSV, has trade count AND USD-converted notional
-  - LatAm SEF : comma CSV, has USD-converted notional but NO trade count
-  - GFI / BGC : identical Excel template ("SEF PERMITTED AND REQUIRED
-                INSTRUMENTS..."), notional in LOCAL currency only, no
-                trade count column
-  - ICAP (tpSEF): a live HTML table at a fixed URL (no date in the link —
-                it always shows the latest business day), WITH a real
-                "Num of Trades" column
-Because GFI/BGC/LatAm don't give a trade count, we fall back to counting
-ROWS as a proxy and label it clearly as an estimate everywhere it's shown.
-
-Run with:   streamlit run mexico_desk_dashboard.py
-Install:    pip install streamlit pandas requests openpyxl beautifulsoup4 lxml plotly
+Run:      streamlit run theNiche.py
+Install:  pip install streamlit pandas requests openpyxl beautifulsoup4 lxml plotly
 """
 
 import streamlit as st
@@ -110,6 +41,8 @@ import pandas as pd
 import requests
 import re
 import io
+import os
+import base64
 import plotly.express as px
 from datetime import datetime, timedelta
 
@@ -156,22 +89,13 @@ SEF_COLORS = {
 
 TENOR_ORDER = [
     "ON", "TN", "SN",
-    "0M",                     # roll-up bucket for 1W/2W/3W (and odd day tenors)
+    "0M",
     "1W", "2W", "3W",
     "1M", "2M", "3M", "4M", "5M", "6M", "7M", "8M", "9M", "10M", "11M",
     "1Y", "18M", "2Y", "3Y", "4Y", "5Y", "6Y", "7Y", "8Y", "9Y",
     "10Y", "12Y", "15Y", "20Y", "25Y", "30Y", "Other"
 ]
 
-# The FULL, fixed maturity ladder — Cash/ON, TN, and SN each on their OWN
-# row, then 0M (the roll-up for 1W/2W/3W and odd day tenors), then every
-# month a person can buy (1-11), then every year through 10Y. Past 10Y,
-# only the standard market points (15Y, 20Y, 25Y, 30Y) are always shown;
-# any other long-dated tenor (11Y, 12Y, 17Y, etc.) only appears if it
-# actually traded that day — handled by build_comparison()'s "extra
-# tenors" logic, which appends anything found in the data that isn't on
-# this fixed ladder. A final "Other / unmatched" row (if present)
-# guarantees the table total reconciles with the charts.
 FULL_TENOR_LADDER = (
     ["ON", "TN", "SN", "0M"] +
     [f"{m}M" for m in range(1, 12)] +
@@ -186,56 +110,17 @@ TENOR_DISPLAY_LABELS = {
     "Other": "Other / unmatched",
 }
 
-# The ONLY tenors displayed on the IRS ladder (desk request). Anything
-# that traded at a tenor not on this list (e.g. 18M, 4M, ON) rolls into
-# a single 'Other / non-standard tenor' row so the totals still
-# reconcile — nothing is silently dropped, it's just not given its own row.
+# The desk's standard IRS points. Anything traded elsewhere rolls into one
+# 'Other / non-standard tenor' row so totals still reconcile.
 IRS_DISPLAY_TENORS = (
     ["1M", "2M", "3M", "6M", "9M"] +
     [f"{y}Y" for y in range(1, 11)] +
     ["12Y", "15Y", "20Y", "25Y", "30Y"]
 )
 
-
-def tenor_display(t: str) -> str:
-    return TENOR_DISPLAY_LABELS.get(t, t)
-
-
-# Only the week tenors (1W/2W/3W) roll into the "0M" reporting bucket for
-# the comparison tables and charts — Cash/ON, TN, and SN each keep their
-# OWN row on the ladder. Odd day tenors (e.g. '2D', '5D') also fall into
-# 0M since they're sub-week oddballs with no ladder row of their own.
-# The drill-down keeps the ORIGINAL tenor (1W, 2W, ...) so no information
-# is lost — only the summary aggregation changes.
 SUB_MONTH_TENORS = {"1W", "2W", "3W"}
 
-
-def tenor_bucket(t: str) -> str:
-    """Map a parsed tenor to its reporting bucket. Weeks (1W/2W/3W) and
-    odd day tenors -> '0M'; ON/TN/SN and everything else unchanged."""
-    if not isinstance(t, str):
-        return "Other"
-    original = t.strip()
-    up = original.upper()
-    if up in ("ON", "TN", "SN"):
-        return up            # each keeps its own ladder row
-    if up in SUB_MONTH_TENORS:
-        return "0M"
-    if re.fullmatch(r'(\d+)D', up):
-        return "0M"          # odd day tenors (2D, 5D...) — no row of their own
-    m = re.fullmatch(r'(\d+)W', up)
-    if m and int(m.group(1)) <= 3:
-        return "0M"
-    return original  # pass through UNCHANGED ('Other', '1W vs 1M', '10Y', ...)
-
-
-# Mexican TIIE swaps are quoted by NUMBER OF 28-DAY PERIODS, not calendar
-# months/years — the market convention counts 13 periods (13*28=364 days)
-# as "a year," 26 periods as "2 years," etc. This table converts those
-# period-counts to the standard Y/M labels so every source's MXN swaps
-# line up on the SAME row for comparison (verified by cross-checking
-# prices: LatAm's 13x1 and Tradition's "1 Year" both quote 6.735 on the
-# same day — they are the same instrument, just named differently).
+# MXN TIIE swaps are quoted in 28-day periods (13 periods = "1 year").
 LATAM_PERIOD_TENOR = {
     1: "1M", 3: "3M", 6: "6M", 9: "9M", 13: "1Y", 19: "18M", 26: "2Y",
     39: "3Y", 52: "4Y", 65: "5Y", 78: "6Y", 91: "7Y", 104: "8Y",
@@ -243,25 +128,43 @@ LATAM_PERIOD_TENOR = {
 }
 
 # ═════════════════════════════════════════════════════════════════════════
-# CONFIG — FX
+# CONFIG — PERSISTENCE (one file per day, never combined)
 # ═════════════════════════════════════════════════════════════════════════
-# Frankfurter.app republishes the ECB's daily reference rates (fixed
-# 16:00 CET) for free, with no API key, and supports historical dates —
-# the closest thing to an "official daily fixing" available without a
-# paid subscription (Banxico's own SIE API requires a registered token,
-# so it isn't used here to keep this a zero-install dashboard).
-FRANKFURTER_BASE = "https://api.frankfurter.app"
-ECB_CURRENCIES = [
-    "EUR", "GBP", "JPY", "CAD", "CHF", "SEK", "NOK", "TRY", "HUF", "MXN",
-    "AUD", "NZD", "DKK", "PLN", "CZK", "ILS", "SGD", "ZAR",
-]
-# NOT published by the ECB — must be entered manually in the sidebar if
-# any trades in these currencies show up. Never silently estimated.
-EXOTIC_NO_ECB_RATE = ["CLP", "COP", "PEN"]
+ICAP_SNAPSHOT_DIR = "icap_snapshots"
+DV01_GRID_DIR = "dv01_grids"
+LEGACY_DV01_FILE = "dv01_grid.csv"      # old single-grid file — still read as a fallback
+HISTORY_START = datetime(2026, 7, 9)    # first day the desk wanted history from
+
+DV01_GRID_BASE = 5000.0   # grid = MXN millions of notional per THIS many USD of DV01
+DEFAULT_DV01_GRID = {
+    "1M": 11293.90, "2M": 5661.80, "3M": 3784.42, "4M": 2845.76,
+    "5M": 2282.58,  "6M": 1907.15, "7M": 1639.00, "8M": 1437.90,
+    "9M": 1281.51,  "10M": 1156.40, "11M": 1054.05,
+    "1Y": 896.60,   "18M": 623.41,
+    "2Y": 464.53, "3Y": 321.45, "4Y": 250.47, "5Y": 208.21,
+    "6Y": 180.31, "7Y": 160.64, "8Y": 146.06, "9Y": 134.96,
+    "10Y": 126.22, "12Y": 113.51, "15Y": 101.47, "20Y": 90.64,
+    "25Y": 84.89, "30Y": 81.50,
+}
+
+
 
 # ═════════════════════════════════════════════════════════════════════════
 # SHARED HELPERS
 # ═════════════════════════════════════════════════════════════════════════
+def safe_sorted(values, key=None):
+    """Sort anything without blowing up on mixed types. A blank cell in any
+    source file comes back from pandas as float NaN — sorting that against
+    real string values raises TypeError ('<' not supported between float and
+    str), which is exactly what was killing the page. Coerce to str first."""
+    vals = [("" if v is None else str(v)) for v in values]
+    return sorted(vals, key=key) if key else sorted(vals)
+
+
+def safe_unique(series) -> list:
+    return safe_sorted(pd.Series(series).dropna().unique())
+
+
 def last_business_day() -> datetime:
     d = datetime.today() - timedelta(days=1)
     while d.weekday() >= 5:
@@ -270,7 +173,6 @@ def last_business_day() -> datetime:
 
 
 def fmt_m(n):
-    """Format a raw number as millions/billions with 2-3 decimals."""
     if n is None or pd.isna(n):
         return "—"
     if abs(n) >= 1e9:
@@ -281,13 +183,13 @@ def fmt_m(n):
 
 
 def fmt_exact(n):
-    """Format a raw number with full precision (no abbreviation)."""
     if n is None or pd.isna(n):
         return "—"
     return f"{n:,.0f}"
 
 
 def tenor_sort_key(t):
+    t = str(t)
     try:
         return TENOR_ORDER.index(t)
     except ValueError:
@@ -295,109 +197,319 @@ def tenor_sort_key(t):
 
 
 def sort_tenors(series: pd.Series) -> pd.Categorical:
-    vals = series.unique().tolist()
+    vals = [str(v) for v in series.unique().tolist()]
     known = [t for t in TENOR_ORDER if t in vals]
-    other = sorted([t for t in vals if t not in known])
-    return pd.Categorical(series, categories=known + other, ordered=True)
+    other = safe_sorted([t for t in vals if t not in known])
+    return pd.Categorical(series.astype(str), categories=known + other, ordered=True)
 
 
-def tenor_to_years(t) -> float:
-    """Convert a tenor label to years for the DV01 approximation.
-    Returns None for spread tenors ('1W vs 1M') and unparseable rows —
-    those get no DV01 and are excluded from DV01 comparisons."""
+def tenor_display(t: str) -> str:
+    return TENOR_DISPLAY_LABELS.get(str(t), str(t))
+
+
+def days_to_tenor_bucket(days: int) -> str:
+    if days <= 1:
+        return "ON"
+    if days <= 3:
+        return "TN"
+    if days <= 10:
+        return "1W"
+    if days <= 18:
+        return "2W"
+    if days <= 25:
+        return "3W"
+    if days <= 45:
+        return "1M"
+    if days <= 75:
+        return "2M"
+    if days <= 105:
+        return "3M"
+    if days <= 195:
+        return "6M"
+    if days <= 285:
+        return "9M"
+    if days <= 400:
+        return "1Y"
+    if days <= 600:
+        return "18M"
+    if days <= 760:
+        return "2Y"
+    return "Other"
+
+
+def tenor_bucket(t) -> str:
+    """Reporting bucket. Weeks (1W/2W/3W) and sub-month day counts -> '0M';
+    longer day counts ('182D', '364D') -> their REAL month/year bucket;
+    ON/TN/SN keep their own row."""
+    if not isinstance(t, str):
+        return "Other"
+    original = t.strip()
+    up = original.upper()
+    if up in ("ON", "TN", "SN"):
+        return up
+    if up in SUB_MONTH_TENORS:
+        return "0M"
+    m = re.fullmatch(r'(\d+)D', up)
+    if m:
+        b = days_to_tenor_bucket(int(m.group(1)))
+        return "0M" if b in ("ON", "TN", "1W", "2W", "3W") else b
+    m = re.fullmatch(r'(\d+)W', up)
+    if m and int(m.group(1)) <= 3:
+        return "0M"
+    return original
+
+
+def tenor_to_years(t):
     if not isinstance(t, str):
         return None
     up = t.strip().upper()
     if up in ("ON", "TN", "SN"):
         return 1 / 365
-    m = re.fullmatch(r'(\d+)Y', up)
-    if m:
-        return float(m.group(1))
-    m = re.fullmatch(r'(\d+)M', up)
-    if m:
-        return int(m.group(1)) / 12
-    m = re.fullmatch(r'(\d+)W', up)
-    if m:
-        return int(m.group(1)) / 52
-    m = re.fullmatch(r'(\d+)D', up)
-    if m:
-        return int(m.group(1)) / 365
+    for pat, div in ((r'(\d+)Y', 1), (r'(\d+)M', 12), (r'(\d+)W', 52), (r'(\d+)D', 365)):
+        m = re.fullmatch(pat, up)
+        if m:
+            return float(m.group(1)) / div
     return None
 
 
-def add_dv01(df: pd.DataFrame) -> pd.DataFrame:
-    """DV01 (USD) ≈ USD notional × tenor in years × 1bp. A flat-annuity
-    desk approximation (no discounting) — good for cross-SEF volume
-    comparison, not for risk. Only meaningful for rates products, so FX
-    rows get NA and the FX section falls back to USD notional."""
+# ═════════════════════════════════════════════════════════════════════════
+# DV01 — per-day grids
+# ═════════════════════════════════════════════════════════════════════════
+def _dv01_path(d: datetime) -> str:
+    return os.path.join(DV01_GRID_DIR, f"dv01_{d.strftime('%Y%m%d')}.csv")
+
+
+def _read_grid_csv(path: str):
+    try:
+        df = pd.read_csv(path)
+        g = {}
+        for _, r in df.iterrows():
+            t = r.get("Tenor")
+            v = pd.to_numeric(r.get("MXN_mm_per_5k_DV01"), errors="coerce")
+            if isinstance(t, str) and pd.notna(v) and v > 0:
+                g[t.strip().upper()] = float(v)
+        return g or None
+    except Exception:
+        return None
+
+
+def list_dv01_grid_dates():
+    if not os.path.isdir(DV01_GRID_DIR):
+        return []
+    out = []
+    for f in sorted(os.listdir(DV01_GRID_DIR)):
+        m = re.fullmatch(r'dv01_(\d{8})\.csv', f)
+        if m:
+            out.append(datetime.strptime(m.group(1), "%Y%m%d"))
+    return sorted(out)
+
+
+def load_dv01_grid_for_date(d: datetime):
+    """(grid, label). Exact day if saved → else last grid saved BEFORE that
+    day (carried forward) → else the built-in default. Never guesses silently:
+    the label is printed on screen."""
+    p = _dv01_path(d)
+    if os.path.exists(p):
+        g = _read_grid_csv(p)
+        if g:
+            return g, f"saved for {d:%b %d}"
+    prior = [x for x in list_dv01_grid_dates() if x.date() < d.date()]
+    if prior:
+        g = _read_grid_csv(_dv01_path(prior[-1]))
+        if g:
+            return g, f"carried forward from {prior[-1]:%b %d} (not edited on {d:%b %d})"
+    if os.path.exists(LEGACY_DV01_FILE):
+        g = _read_grid_csv(LEGACY_DV01_FILE)
+        if g:
+            return g, "default grid"
+    return dict(DEFAULT_DV01_GRID), "default grid (never edited)"
+
+
+def save_dv01_grid_for_date(g: dict, d: datetime) -> bool:
+    try:
+        os.makedirs(DV01_GRID_DIR, exist_ok=True)
+        pd.DataFrame({"Tenor": list(g.keys()), "MXN_mm_per_5k_DV01": list(g.values())}) \
+            .to_csv(_dv01_path(d), index=False)
+        return True
+    except Exception:
+        return False
+
+
+def ensure_todays_dv01_grid():
+    """Every business day gets its own grid file, even if nobody touches it —
+    the carried-forward/default values are written down so a past date always
+    values on exactly what was in force that day."""
+    d = last_business_day()
+    if not os.path.exists(_dv01_path(d)):
+        g, _ = load_dv01_grid_for_date(d)
+        save_dv01_grid_for_date(g, d)
+
+
+def _norm_tenor_label(tok: str):
+    """Turn whatever the desk writes into a standard label.
+    '13x1' -> 1Y (28-day periods) · '10 Year' -> 10Y · '6M' -> 6M · '18m' -> 18M"""
+    t = str(tok).strip().upper().replace(" ", "")
+    m = re.fullmatch(r'(\d+)X\d+', t)                 # period notation: 13x1, 26x1...
+    if m:
+        p = int(m.group(1))
+        if p in LATAM_PERIOD_TENOR:
+            return LATAM_PERIOD_TENOR[p]
+        yrs = p / 13.0
+        return f"{round(yrs)}Y" if yrs >= 1 else f"{round(p * 28 / 30)}M"
+    m = re.fullmatch(r'(\d+)(Y|YR|YRS|YEAR|YEARS)', t)
+    if m:
+        return f"{m.group(1)}Y"
+    m = re.fullmatch(r'(\d+)(M|MO|MOS|MONTH|MONTHS)', t)
+    if m:
+        return f"{m.group(1)}M"
+    return None
+
+
+def parse_pasted_grid(text: str, fallback_order: list):
+    """Read a grid pasted straight out of Excel or the desk's email.
+
+    Accepts, in any mix:
+      · '10Y<tab>126.22'  ·  '13x1  896.60'  ·  '6 Month, 1,907.15'  ·  '30Y $81.50'
+      · a bare column of numbers, in ladder order (mapped onto fallback_order)
+    Header rows, blank lines, commas, $ and % are all tolerated.
+    Returns (grid_dict, n_matched, unrecognised_lines)."""
+    grid, loose_values, bad = {}, [], []
+    # a tenor written any way the desk writes it: 10Y · 6M · 13x1 · 6 Month · 2 Years
+    TENOR_RE = re.compile(r'\b(\d+)\s*(?:X\s*\d+|YEARS?|YRS?|Y|MONTHS?|MOS?|M)\b')
+
+    for raw_line in str(text).strip().splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        # kill thousands separators FIRST — otherwise '11,293.90' splits into two numbers
+        line = re.sub(r'(?<=\d),(?=\d{3}(?:\D|$))', '', line)
+        line = line.replace("$", "").replace("%", "")
+
+        up = line.upper()
+        label, rest = None, up
+        m = TENOR_RE.search(up)
+        if m:
+            label = _norm_tenor_label(m.group(0).replace(" ", ""))
+            if label:
+                rest = up[:m.start()] + " " + up[m.end():]   # so the tenor's digits aren't read as the value
+
+        nums = re.findall(r'-?\d+(?:\.\d+)?', rest)
+        if not nums:
+            bad.append(raw_line.strip())      # header row or junk
+            continue
+        value = float(nums[-1])
+
+        if label:
+            grid[label] = value
+        else:
+            loose_values.append(value)
+
+    # A bare column of numbers: map onto the existing ladder in order.
+    if not grid and loose_values:
+        for tenor, v in zip(fallback_order, loose_values):
+            grid[tenor] = v
+    grid = {k: v for k, v in grid.items() if v > 0}
+    return grid, len(grid), bad
+
+
+def _grid_year_points(grid: dict):
+    pts = []
+    for label, v in grid.items():
+        y = tenor_to_years(str(label))
+        if y is not None and v and v > 0:
+            pts.append((y, DV01_GRID_BASE / float(v)))
+    pts.sort()
+    dedup = []
+    for y, d in pts:
+        if not dedup or y > dedup[-1][0]:
+            dedup.append((y, d))
+    return dedup
+
+
+def dv01_per_million_mxn(bucket: str, grid: dict, pts: list):
+    if bucket in grid and grid[bucket] and grid[bucket] > 0:
+        return DV01_GRID_BASE / float(grid[bucket]), "desk grid"
+    y = tenor_to_years(bucket)
+    if y is None or not pts:
+        return None, None
+    if y <= pts[0][0]:
+        return pts[0][1] * (y / pts[0][0]), "interpolated"
+    if y >= pts[-1][0]:
+        return pts[-1][1], "interpolated"
+    for (y0, d0), (y1, d1) in zip(pts, pts[1:]):
+        if y0 <= y <= y1:
+            w = (y - y0) / (y1 - y0)
+            return d0 + w * (d1 - d0), "interpolated"
+    return None, None
+
+
+def add_dv01(df: pd.DataFrame, grid: dict) -> pd.DataFrame:
+    """DV01 (USD) = MXN notional (millions) / grid[tenor] × 5,000.
+
+    MXN rates rows only. Nothing is converted anywhere in this app — the grid
+    IS the MXN→USD-DV01 bridge and it's the desk's own number. A non-MXN rates
+    row (SOFR etc.) or a spread trade with no single tenor simply gets no DV01
+    rather than an invented one."""
     df = df.copy()
-    df["Tenor_Years"] = df["Tenor"].astype(str).apply(tenor_to_years)
+    pts = _grid_year_points(grid)
+    buckets = df["Tenor"].astype(str).apply(tenor_bucket)
     df["DV01_USD"] = pd.NA
+    df["DV01_Method"] = ""
     is_irs = df["Category"] == "IRS / Swap"
-    usd = pd.to_numeric(df["USD_Notional_Computed"], errors="coerce")
-    yrs = pd.to_numeric(df["Tenor_Years"], errors="coerce")
-    df.loc[is_irs, "DV01_USD"] = (usd * yrs * 1e-4)[is_irs]
+    local = pd.to_numeric(df["Notional_Local"], errors="coerce")
+    for idx in df.index[is_irs]:
+        if str(df.at[idx, "Currency"]).upper() != "MXN" or pd.isna(local.loc[idx]):
+            continue
+        per_mm, method = dv01_per_million_mxn(buckets.loc[idx], grid, pts)
+        if per_mm is not None:
+            df.at[idx, "DV01_USD"] = local.loc[idx] / 1e6 * per_mm
+            df.at[idx, "DV01_Method"] = method
     return df
 
 
-# ── Product classification ────────────────────────────────────────────────
-# Order matters, and mirrors how a Mexico rates & FX broker reads a ticket:
-#   1. Rate-index / swap markers (TIIE, SOFR, IRS, BASIS, XCCY...) → IRS.
-#      Checked FIRST so a "USDMXN basis swap" stays an IRS even though it
-#      names a currency pair.
-#   2. Currency pair + option language (Put/Call/delta/RR/fly/straddle...)
-#      → FX. Catches tickets like '1W USD vs. MXN Put at a delta of 50'
-#      that carry no NDF/FWD/FXO keyword at all.
-#   3. Generic FX markers (NDF, FWD, SPOT, FXO...) → FX.
-#   4. Otherwise → Other.
+def tiie_pv01(notional_mxn: float, rate_pct: float, days: int):
+    """PV01 the way the desk's Excel does it: annuity of 28-day periods,
+    each discounted at (1 + r×28/360) compounded per period."""
+    n = max(1, round(days / 28))
+    p = (rate_pct / 100.0) * 28 / 360
+    annuity = sum((1 + p) ** -i for i in range(1, n + 1)) * (28 / 360)
+    return notional_mxn * annuity * 1e-4, n
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# CLASSIFICATION
+# ═════════════════════════════════════════════════════════════════════════
 FX_OPTION_MARKERS = [
     "PUT", "CALL", "DELTA", "RISK REVERSAL", "BUTTERFLY",
     "STRADDLE", "STRANGLE", "SEAGULL", "DIGITAL", "OPTION",
 ]
-# 'USD vs. MXN', 'USD v MXN', 'USD/MXN', 'USDMXN', 'USD-MXN' ...
-CCY_PAIR_RE = re.compile(
-    r'\b[A-Z]{3}\s*(?:VS\.?|V\.?|/|-)?\s*(?:MXN|USD|EUR|GBP|JPY|CAD|CLP|COP|PEN|BRL|CHF|AUD|NZD)\b'
-)
 
 
 def _has_ccy_pair(t: str) -> bool:
     if re.search(r'\b([A-Z]{3})\s*(?:VS\.?|V\.?|/|-)\s*([A-Z]{3})\b', t):
         return True
-    # concatenated pairs like USDMXN / EURMXN / MXNUSD
     if re.search(r'\b(USD|EUR|GBP|JPY|CAD|CHF|AUD|NZD)(MXN|CLP|COP|PEN|BRL|USD|EUR|JPY)\b', t):
         return True
     return False
 
 
 def classify_category(text: str) -> str:
-    """Bucket a product into IRS/Swap, FX, or Other based on keywords."""
     if not isinstance(text, str):
         return "Other"
     t = text.upper()
-    # 'FX Swap' is an FX product — must be caught BEFORE the generic 'SWAP'
-    # marker below sends it to the rates bucket.
     if "FX SWAP" in t or "FXSWAP" in t:
         return "FX"
     ir_markers = ["IRS", "OIS", "SWAP", "BASIS", "XBS", "XCCY", "FRA", "SBS",
                   "ZCI", "TIIE", "SOFR", "SONIA", "ESTR", "CORRA", "TONAT", "TLREF"]
     if any(m in t for m in ir_markers):
         return "IRS / Swap"
-    # FX options with no explicit FX keyword — e.g.
-    # '1W USD vs. MXN Put at a delta of 50'
     if _has_ccy_pair(t) and any(m in t for m in FX_OPTION_MARKERS):
         return "FX"
-    fx_markers = ["NDF", "FX", "FWD", "FXO", "SPOT", "CALL", "PUT"]
-    if any(m in t for m in fx_markers):
+    if any(m in t for m in ["NDF", "FX", "FWD", "FXO", "SPOT", "CALL", "PUT"]):
         return "FX"
     return "Other"
 
 
-# Regulatory asset-class codes, as printed on GFI/BGC/ICAP files:
-#   IR = interest rates, CU = currency/FX, CD = credit.
-# GFI/BGC/ICAP publish these directly — we keep theirs verbatim. For
-# Tradition/LatAm (which don't publish a code) we derive it from the
-# product category. Shown ONLY in the individual-trades drill-down; the
-# main navigation stays IRS / FX.
 CATEGORY_TO_ASSETCLASS = {"IRS / Swap": "IR", "FX": "CU"}
 
 
@@ -405,11 +517,6 @@ def derive_asset_class(category: str) -> str:
     return CATEGORY_TO_ASSETCLASS.get(category, "—")
 
 
-# TIIE (Mexico's interbank rate), F-TIIE (its futures-referenced variant),
-# and UDI (Mexico's inflation-linked unit) are Mexico-specific markers that
-# can appear WITHOUT the literal string "MXN" — e.g. a USD-settled
-# cross-currency basis swap referencing F-TIIE is still a Mexican trade.
-# Checking for these catches those rows that a plain "MXN" search misses.
 MEXICO_MARKERS = ["MXN", "TIIE", "F-TIIE", "UDI"]
 
 
@@ -421,86 +528,9 @@ def contains_mxn(row_text: str) -> bool:
 
 
 # ═════════════════════════════════════════════════════════════════════════
-# FX — fetch official rates + convert every row to USD
-# ═════════════════════════════════════════════════════════════════════════
-@st.cache_data(ttl=1800, show_spinner=False)
-def fetch_fx_rates(report_date_str: str):
-    """
-    Fetches ECB daily reference rates for report_date_str ('YYYY-MM-DD'),
-    quoted as 'units of CCY per 1 USD' (so USD itself = 1.0, and the same
-    formula — Local_Notional / rate — converts ANY currency to USD
-    regardless of whether that currency is normally quoted as CCY-per-USD
-    or USD-per-CCY in the market).
-
-    Returns (rates_dict, source_label, note_or_None, error_or_None).
-    """
-    url = f"{FRANKFURTER_BASE}/{report_date_str}?from=USD&to={','.join(ECB_CURRENCIES)}"
-    try:
-        r = requests.get(url, timeout=15)
-        r.raise_for_status()
-        data = r.json()
-    except Exception as e:
-        return {}, "ECB daily reference rate — FETCH FAILED", None, f"FX fetch error: {e}"
-
-    rates = dict(data.get("rates", {}))
-    rates["USD"] = 1.0
-    actual_date = data.get("date", report_date_str)
-    note = None
-    if actual_date != report_date_str:
-        note = (f"ECB had no fixing dated {report_date_str} (weekend/holiday) — "
-                f"used the most recent prior business day instead: {actual_date}.")
-    return rates, f"ECB daily reference rate ({actual_date})", note, None
-
-
-def apply_fx(df: pd.DataFrame, fx_rates: dict, manual_overrides: dict, fx_source_label: str) -> pd.DataFrame:
-    """
-    Adds, for every row:
-      USD_Notional_Computed  — Original_Notional / (CCY per 1 USD), or NA if no rate
-      FX_Rate_Used           — the rate applied (CCY per 1 USD)
-      FX_Source              — where that rate came from
-      FX_CrossCheck          — vs. the source's OWN published USD figure, if any
-    Nothing is ever guessed: if a currency has no rate (official or manual),
-    USD_Notional_Computed is NA and FX_Source says so explicitly.
-    """
-    df = df.copy()
-
-    def convert(row):
-        ccy = row["Currency"]
-        local = row["Notional_Local"]
-        if ccy == "USD":
-            return pd.Series([local, 1.0, "USD (no conversion needed)"])
-        if ccy in fx_rates and fx_rates.get(ccy):
-            rate = fx_rates[ccy]
-            usd = local / rate if rate else pd.NA
-            return pd.Series([usd, rate, fx_source_label])
-        if ccy in manual_overrides and manual_overrides.get(ccy):
-            rate = manual_overrides[ccy]
-            return pd.Series([local / rate, rate, "Manual entry (user-provided — NOT an official fixing)"])
-        return pd.Series([pd.NA, pd.NA, "Missing — no FX rate available for this currency"])
-
-    df[["USD_Notional_Computed", "FX_Rate_Used", "FX_Source"]] = df.apply(convert, axis=1)
-
-    def check(row):
-        pub = row.get("Notional_USD")
-        calc = row["USD_Notional_Computed"]
-        if pd.isna(pub) or pd.isna(calc) or pub == 0:
-            return "N/A"
-        diff_pct = abs(pub - calc) / abs(pub) * 100
-        return "✓ Match" if diff_pct < 1.0 else f"⚠ {diff_pct:.1f}% diff"
-
-    df["FX_CrossCheck"] = df.apply(check, axis=1)
-    return df
-
-
-# ═════════════════════════════════════════════════════════════════════════
 # PARSER 1 — TRADITION (pipe-delimited CSV)
 # ═════════════════════════════════════════════════════════════════════════
 def extract_tenor_tradition(desc: str) -> str:
-    """
-    Tradition descriptions look like '3 Month Overnight Index Swap...' or
-    '10 Year Overnight Index Swap...'. IMPORTANT: 'Overnight Index Swap' is
-    the PRODUCT TYPE (OIS), not the tenor — the tenor is the leading number.
-    """
     if not isinstance(desc, str):
         return "Other"
     d = desc.upper().strip()
@@ -546,30 +576,22 @@ def extract_tenor_tradition(desc: str) -> str:
 def parse_tradition(raw_text: str) -> pd.DataFrame:
     df = pd.read_csv(io.StringIO(raw_text), sep="|", dtype=str, on_bad_lines="skip")
     df.columns = [c.strip() for c in df.columns]
-    # NOTE — _NDA (Non-Delta-Adjusted = GROSS) notionals, not _DA:
-    # Tradition's _DA columns multiply option notional by the delta as a
-    # WHOLE number (a 50-delta option on 10M shows 500M, i.e. 10M x 50,
-    # not 10M x 0.50), so _DA is 10-50x gross for delta-quoted options and
-    # not comparable to the gross notionals every other SEF publishes.
-    # For swaps/NDFs, DA == NDA in every row, so only options are affected.
+    # _NDA = Non-Delta-Adjusted (GROSS). Tradition's _DA columns apply option
+    # deltas as WHOLE numbers (50x, not 0.50x), so they aren't comparable to
+    # the gross notionals every other SEF publishes. Swaps/NDFs: DA == NDA.
     for col in ["Total_Notional_USD_NDA", "Notional_Traded_Currency_NDA",
                 "Total_Trade_Count", "First_Price", "Last_Price"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
     desc_col = next((c for c in ["Internal_Prod_Des", "Internal_Prod_ID"] if c in df.columns), None)
-    # Classify off Sub_Prod AND the description COMBINED. Classifying off
-    # Sub_Prod alone (as before) sent FX options like '1W USD vs. MXN Put
-    # at a delta of 50' into "Other" whenever the Sub_Prod field carried a
-    # generic label with no FX keyword in it.
     sub_prod = df["Sub_Prod"].astype(str) if "Sub_Prod" in df.columns else pd.Series([""] * len(df))
     desc_ser = df[desc_col].astype(str) if desc_col else pd.Series([""] * len(df))
-    cat_text = (sub_prod.fillna("") + " " + desc_ser.fillna(""))
-    categories = cat_text.apply(classify_category)
-    out = pd.DataFrame({
+    categories = (sub_prod.fillna("") + " " + desc_ser.fillna("")).apply(classify_category)
+    return pd.DataFrame({
         "SEF": "Tradition",
         "Tenor": df[desc_col].apply(extract_tenor_tradition) if desc_col else "Other",
         "Category": categories,
-        "AssetClass": categories.map(derive_asset_class),  # Tradition publishes no IR/CU/CD code — derived
+        "AssetClass": categories.map(derive_asset_class),
         "Currency": df["Curr_Code"].str.strip().str.upper() if "Curr_Code" in df.columns else "N/A",
         "Notional_Local": df["Notional_Traded_Currency_NDA"] if "Notional_Traded_Currency_NDA" in df.columns else 0,
         "Notional_USD": df["Total_Notional_USD_NDA"] if "Total_Notional_USD_NDA" in df.columns else pd.NA,
@@ -577,52 +599,15 @@ def parse_tradition(raw_text: str) -> pd.DataFrame:
         "Trades_Estimated": False,
         "Last_Price": df["Last_Price"] if "Last_Price" in df.columns else pd.NA,
         "Description": df[desc_col] if desc_col else "",
-        "MXN_Match": (df[desc_col].astype(str) if desc_col else pd.Series([""] * len(df))).apply(contains_mxn) |
+        "MXN_Match": desc_ser.apply(contains_mxn) |
                      (df["Curr_Code"].astype(str) == "MXN" if "Curr_Code" in df.columns else False),
     })
-    return out
 
 
 # ═════════════════════════════════════════════════════════════════════════
-# PARSER 2 — LATAM SEF (comma CSV, has USD notional but no trade count)
+# PARSER 2 — LATAM SEF
 # ═════════════════════════════════════════════════════════════════════════
-def days_to_tenor_bucket(days: int) -> str:
-    """Map a day-count to the nearest standard FX tenor bucket."""
-    if days <= 1:
-        return "ON"
-    if days <= 3:
-        return "TN"
-    if days <= 10:
-        return "1W"
-    if days <= 18:
-        return "2W"
-    if days <= 25:
-        return "3W"
-    if days <= 45:
-        return "1M"
-    if days <= 75:
-        return "2M"
-    if days <= 105:
-        return "3M"
-    if days <= 195:
-        return "6M"
-    if days <= 285:
-        return "9M"
-    if days <= 400:
-        return "1Y"
-    if days <= 600:
-        return "18M"
-    if days <= 760:
-        return "2Y"
-    return "Other"
-
-
 def extract_tenor_latam(row) -> str:
-    """LatAm encodes tenor two different ways depending on currency:
-    - MXN rows: trailing '- 130x1' (periods of 28 days)
-    - CLP/COP rows: trailing '- 10-Year' or '- 12-Month' (plain English)
-    - FX rows: 'NDF CCY - DDMonYY' (an explicit expiry date)
-    """
     desc = row.get("Internal_Prod_Des", "")
     if not isinstance(desc, str):
         return "Other"
@@ -639,24 +624,23 @@ def extract_tenor_latam(row) -> str:
         years = periods / 13.0
         if years >= 1:
             return f"{round(years)}Y"
-        months = round(periods * 28 / 30)
-        return f"{months}M"
+        return f"{round(periods * 28 / 30)}M"
     m2 = re.search(r'-\s*(\d{1,2}[A-Za-z]{3}\d{2,4})\s*$', d)
     if m2:
-        try:
-            expiry = datetime.strptime(m2.group(1), "%d%b%y")
-        except ValueError:
+        expiry = None
+        for fmt in ("%d%b%y", "%d%b%Y"):
             try:
-                expiry = datetime.strptime(m2.group(1), "%d%b%Y")
+                expiry = datetime.strptime(m2.group(1), fmt)
+                break
             except ValueError:
-                return "Other"
-        trade_date_str = str(row.get("Trade_Date", ""))
+                continue
+        if expiry is None:
+            return "Other"
         try:
-            trade_date = datetime.strptime(trade_date_str, "%Y%m%d")
+            trade_date = datetime.strptime(str(row.get("Trade_Date", "")), "%Y%m%d")
         except ValueError:
             return "Other"
-        days = (expiry - trade_date).days
-        return days_to_tenor_bucket(days)
+        return days_to_tenor_bucket((expiry - trade_date).days)
     return "Other"
 
 
@@ -667,58 +651,45 @@ def parse_latam(raw_text: str) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
     categories = (df["Internal_Prod_Des"].apply(classify_category)
-                  if "Internal_Prod_Des" in df.columns
-                  else pd.Series(["Other"] * len(df)))
-    out = pd.DataFrame({
+                  if "Internal_Prod_Des" in df.columns else pd.Series(["Other"] * len(df)))
+    return pd.DataFrame({
         "SEF": "LatAm SEF",
         "Tenor": df.apply(extract_tenor_latam, axis=1),
         "Category": categories,
-        "AssetClass": categories.map(derive_asset_class),  # LatAm publishes no IR/CU/CD code — derived
+        "AssetClass": categories.map(derive_asset_class),
         "Currency": df["Curr_Code"].str.strip().str.upper() if "Curr_Code" in df.columns else "N/A",
         "Notional_Local": df["Notional_Traded_Currency"] if "Notional_Traded_Currency" in df.columns else 0,
         "Notional_USD": df["Notional_USD"] if "Notional_USD" in df.columns else pd.NA,
-        "Trades": 1,  # LatAm gives no trade count — one row = one print (proxy)
+        "Trades": 1,   # LatAm publishes no trade count — one row = one print (proxy)
         "Trades_Estimated": True,
         "Last_Price": df["Last_Price"] if "Last_Price" in df.columns else pd.NA,
         "Description": df["Internal_Prod_Des"] if "Internal_Prod_Des" in df.columns else "",
         "MXN_Match": (df["Curr_Code"].astype(str) == "MXN" if "Curr_Code" in df.columns else False) |
-                     (df["Internal_Prod_Des"].astype(str).apply(contains_mxn) if "Internal_Prod_Des" in df.columns else False),
+                     (df["Internal_Prod_Des"].astype(str).apply(contains_mxn)
+                      if "Internal_Prod_Des" in df.columns else False),
     })
-    return out
 
 
 # ═════════════════════════════════════════════════════════════════════════
-# PARSER 3 — GFI / BGC (identical Excel template, LOCAL currency notional)
+# PARSER 3 — GFI / BGC
 # ═════════════════════════════════════════════════════════════════════════
 def extract_tenor_ccy_gfi_bgc(desc: str):
-    """
-    GFI/BGC descriptions embed tenor+currency right together, e.g.
-    '...10YMXN MXN 28D1 200...' or '...6MMXN MXN 28D1 200...'.
-    Returns (tenor, currency) or (None, None) if no match.
-    """
     if not isinstance(desc, str):
         return None, None
     m = re.search(r'\b(\d+)(Y|M)([A-Z]{3})\b', desc.upper())
     if m:
-        num, unit, ccy = m.group(1), m.group(2), m.group(3)
-        tenor = f"{num}{unit}"
-        return tenor, ccy
+        return f"{m.group(1)}{m.group(2)}", m.group(3)
     return None, None
 
 
 def extract_fx_tenor_gfi_bgc(desc: str, report_date: datetime):
-    """
-    FX option rows look like 'EURMXN CALL 25D NEW YORK 06NOV2026 C1
-    BILATERAL'. The trailing date is the expiry; tenor = expiry - report date.
-    """
     if not isinstance(desc, str):
         return "Other"
     m = re.search(r'(\d{1,2}[A-Z]{3}\d{4})', desc.upper())
     if m:
         try:
             expiry = datetime.strptime(m.group(1), "%d%b%Y")
-            days = (expiry - report_date).days
-            return days_to_tenor_bucket(days)
+            return days_to_tenor_bucket((expiry - report_date).days)
         except ValueError:
             return "Other"
     return "Other"
@@ -728,17 +699,12 @@ def _col_letters_to_index(col_str: str) -> int:
     idx = 0
     for ch in col_str:
         idx = idx * 26 + (ord(ch.upper()) - ord('A') + 1)
-    return idx - 1  # 0-based
+    return idx - 1
 
 
 def read_xlsx_stdlib(raw_bytes: bytes, sheet_name: str):
-    """
-    Minimal, dependency-free XLSX reader using ONLY Python's standard
-    library (zipfile + xml.etree.ElementTree). Automatic fallback when
-    openpyxl isn't installed — means GFI/BGC work with zero installs, same
-    as Tradition/LatAm's plain CSVs.
-    Returns a list of rows (each a list of string cell values).
-    """
+    """Zero-dependency XLSX reader (zipfile + ElementTree) used when openpyxl
+    isn't installed."""
     import zipfile
     import xml.etree.ElementTree as ET
     NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
@@ -750,35 +716,30 @@ def read_xlsx_stdlib(raw_bytes: bytes, sheet_name: str):
         sheet_file = None
         for sheet in wb_xml.find("m:sheets", NS):
             if sheet.get("name") == sheet_name:
-                rid = sheet.get(f"{REL_NS}id")
-                target = rid_to_target.get(rid, "")
+                target = rid_to_target.get(sheet.get(f"{REL_NS}id"), "")
                 sheet_file = target if target.startswith("xl/") else "xl/" + target.lstrip("/")
                 break
         if sheet_file is None:
             first = list(wb_xml.find("m:sheets", NS))[0]
-            rid = first.get(f"{REL_NS}id")
-            target = rid_to_target.get(rid, "")
+            target = rid_to_target.get(first.get(f"{REL_NS}id"), "")
             sheet_file = target if target.startswith("xl/") else "xl/" + target.lstrip("/")
         shared_strings = []
         if "xl/sharedStrings.xml" in z.namelist():
             ss_xml = ET.fromstring(z.read("xl/sharedStrings.xml"))
             for si in ss_xml.findall("m:si", NS):
-                texts = si.findall(".//m:t", NS)
-                shared_strings.append("".join(t.text or "" for t in texts))
+                shared_strings.append("".join(t.text or "" for t in si.findall(".//m:t", NS)))
         sheet_xml = ET.fromstring(z.read(sheet_file))
-        sheet_data = sheet_xml.find("m:sheetData", NS)
         rows = []
-        for row_el in sheet_data.findall("m:row", NS):
+        for row_el in sheet_xml.find("m:sheetData", NS).findall("m:row", NS):
             row_cells, max_col = {}, -1
             for c_el in row_el.findall("m:c", NS):
                 ref = c_el.get("r", "A1")
                 col_idx = _col_letters_to_index("".join(ch for ch in ref if ch.isalpha()))
                 max_col = max(max_col, col_idx)
-                cell_type = c_el.get("t")
                 v_el = c_el.find("m:v", NS)
                 if v_el is None or v_el.text is None:
                     value = ""
-                elif cell_type == "s":
+                elif c_el.get("t") == "s":
                     value = shared_strings[int(v_el.text)]
                 else:
                     value = v_el.text
@@ -791,9 +752,6 @@ def parse_gfi_bgc(raw_bytes: bytes, sef_name: str, report_date: datetime) -> pd.
     try:
         df = pd.read_excel(io.BytesIO(raw_bytes), sheet_name="SEFTrades", header=2)
     except ImportError:
-        # openpyxl not installed — fall back to the zero-dependency reader
-        # above. header=2 in the pandas call means "skip the first 2 rows",
-        # so we do the same thing manually: rows[2] is the header.
         rows = read_xlsx_stdlib(raw_bytes, "SEFTrades")
         header = rows[2]
         data_rows = [r[:len(header)] + [""] * (len(header) - len(r)) for r in rows[3:]]
@@ -814,8 +772,7 @@ def parse_gfi_bgc(raw_bytes: bytes, sef_name: str, report_date: datetime) -> pd.
             currencies.append(ccy or row.get("Currency", "N/A"))
             categories.append("IRS / Swap")
         elif asset_class == "CU":
-            tenor = extract_fx_tenor_gfi_bgc(desc, report_date)
-            tenors.append(tenor)
+            tenors.append(extract_fx_tenor_gfi_bgc(desc, report_date))
             currencies.append(row.get("Currency", "N/A"))
             categories.append("FX")
         else:
@@ -823,59 +780,41 @@ def parse_gfi_bgc(raw_bytes: bytes, sef_name: str, report_date: datetime) -> pd.
             currencies.append(row.get("Currency", "N/A"))
             categories.append("Other")
 
-    out = pd.DataFrame({
+    return pd.DataFrame({
         "SEF": sef_name,
         "Tenor": tenors,
         "Category": categories,
-        "AssetClass": df["AssetClass"].values,  # real code straight from the file (IR / CU / CD)
+        "AssetClass": df["AssetClass"].values,
         "Currency": [str(c).strip().upper() for c in currencies],
         "Notional_Local": df["Volume"].values if "Volume" in df.columns else 0,
-        "Notional_USD": pd.NA,  # GFI/BGC don't give USD-converted notional
-        "Trades": 1,            # no trade count column — one row = one print (proxy)
+        "Notional_USD": pd.NA,
+        "Trades": 1,   # no trade-count column — row count proxy
         "Trades_Estimated": True,
         "Last_Price": df["Close"].values if "Close" in df.columns else pd.NA,
         "Description": df["InstrumentDescription"].values,
         "MXN_Match": df["InstrumentDescription"].astype(str).apply(contains_mxn).values,
     })
-    return out
 
 
 # ═════════════════════════════════════════════════════════════════════════
-# PARSER 4 — ICAP / tpSEF (live HTML table, no date in URL)
+# PARSER 4 — ICAP / tpSEF
 # ═════════════════════════════════════════════════════════════════════════
 def extract_tenor_icap(instrument: str, description: str) -> str:
-    """
-    ICAP mixes several genuinely different naming conventions in the same
-    feed — confirmed against a real full-day export:
-      1. 'MXN.13*1.F-TIIE.OIS'   — dot/asterisk period notation, same math
-         as LatAm's '13x1' (13 periods of 28 days ~ 1 year)
-      2. 'IRS_MXN_..._0X2'       — 'AxB' forward-tenor notation where B is
-         the tenor in MONTHS
-      3. '1M_USD_MXN_A_FXO...'   — leading tenor, underscore-delimited
-      4. '10Y CAD IRB Outright...' — leading tenor, space-delimited
-      5. 'A-EUR 10Y'             — trailing tenor style
-    Checked in this order because 1 and 2 are narrow/specific patterns that
-    must be tried before the broader leading/trailing fallbacks.
-    """
     text = instrument if isinstance(instrument, str) else ""
     up = text.upper()
 
-    m1 = re.search(r'\.(\d+)\*\d+\.', up)
+    m1 = re.search(r'\.(\d+)\*\d+\.', up)           # MXN.13*1.F-TIIE.OIS
     if m1:
         periods = int(m1.group(1))
         if periods in LATAM_PERIOD_TENOR:
             return LATAM_PERIOD_TENOR[periods]
         years = periods / 13.0
-        if years >= 1:
-            return f"{round(years)}Y"
-        return f"{round(periods * 28 / 30)}M"
+        return f"{round(years)}Y" if years >= 1 else f"{round(periods * 28 / 30)}M"
 
-    m2 = re.search(r'(?:^|_)(\d+)X(\d+)(?:_|$)', up)
+    m2 = re.search(r'(?:^|_)(\d+)X(\d+)(?:_|$)', up)  # IRS_MXN_..._0X2
     if m2:
         months = int(m2.group(2))
-        if months >= 12 and months % 12 == 0:
-            return f"{months // 12}Y"
-        return f"{months}M"
+        return f"{months // 12}Y" if (months >= 12 and months % 12 == 0) else f"{months}M"
 
     m3 = re.match(r'^(\d+)([DWMY])(?=[_\s]|$)', up)
     if m3:
@@ -900,16 +839,12 @@ def extract_tenor_icap(instrument: str, description: str) -> str:
 
     m6 = re.search(r'(\d+)[\s-]?(YEAR|MONTH)S?\b', up)
     if m6:
-        num, unit = m6.group(1), m6.group(2)
-        return f"{num}Y" if unit == "YEAR" else f"{num}M"
+        return f"{m6.group(1)}Y" if m6.group(2) == "YEAR" else f"{m6.group(1)}M"
 
     return "Other"
 
 
 def icap_category(asset_class: str) -> str:
-    """ICAP already labels each row's Asset Class directly — use it rather
-    than guessing from free-text, which misses rows like 'A-EUR 10Y' that
-    carry no product-type keyword at all."""
     ac = str(asset_class).strip().upper()
     if ac == "IR":
         return "IRS / Swap"
@@ -918,9 +853,6 @@ def icap_category(asset_class: str) -> str:
     return "Other"
 
 
-# Known rate-index -> currency, for rows that name the index instead of
-# a currency code (e.g. '10Y SOFR LCH' is a USD product; SOFR never
-# appears with an explicit 'USD' token anywhere in the row).
 ICAP_INDEX_CCY = {
     "SOFR": "USD", "SONIA": "GBP", "ESTR": "EUR", "CORRA": "CAD",
     "TONAT": "JPY", "TONA": "JPY", "TLREF": "TRY",
@@ -933,9 +865,8 @@ def icap_infer_currency(text: str) -> str:
     if not isinstance(text, str):
         return "N/A"
     t = text.upper()
-    # NOTE: use a letter-lookaround instead of \b — underscore counts as a
-    # \w character, so \b does NOT match between '_' and 'USD' in strings
-    # like '1M_USD_MXN_A_FXO'.
+    # letter-lookaround, not \b — underscore is a word char, so \b doesn't
+    # match between '_' and 'USD' in '1M_USD_MXN_A_FXO'
     for code in ICAP_CCY_CODES:
         if re.search(rf'(?<![A-Z]){code}(?![A-Z])', t):
             return code
@@ -946,11 +877,6 @@ def icap_infer_currency(text: str) -> str:
 
 
 class _StdlibTableExtractor:
-    """
-    Extracts every <table>...</table> on a page using ONLY Python's built-in
-    html.parser — no bs4, no lxml. Automatic fallback when BeautifulSoup
-    isn't installed, so ICAP works with zero installs too.
-    """
     def __init__(self):
         from html.parser import HTMLParser
 
@@ -999,7 +925,6 @@ class _StdlibTableExtractor:
 
 
 def extract_tables(html_text: str):
-    """Try BeautifulSoup first (if installed); fall back to pure stdlib."""
     try:
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(html_text, "html.parser")
@@ -1017,12 +942,9 @@ def extract_tables(html_text: str):
 
 
 def _standardize_icap_rows(df: pd.DataFrame) -> pd.DataFrame:
-    """Shared processing for ICAP data, regardless of whether it came from
-    the live HTML page or a manually-exported .numbers file."""
     df = df.rename(columns={k: v for k, v in {
         "Asset Class": "AssetClass", "Tradeable Instrument": "Instrument",
-        "Description": "Description", "Num of Trades": "Trades",
-        "Total Notional Value": "Notional",
+        "Num of Trades": "Trades", "Total Notional Value": "Notional",
     }.items() if k in df.columns})
     for col in ["Trades", "Notional"]:
         if col in df.columns:
@@ -1033,7 +955,7 @@ def _standardize_icap_rows(df: pd.DataFrame) -> pd.DataFrame:
         "Tenor": [extract_tenor_icap(i, d) for i, d in zip(df.get("Instrument", ""), df.get("Description", ""))],
         "Category": df["AssetClass"].apply(icap_category) if "AssetClass" in df.columns else "Other",
         "AssetClass": (df["AssetClass"].astype(str).str.strip().str.upper()
-                       if "AssetClass" in df.columns else "—"),  # real code from the page (IR / CU / CD)
+                       if "AssetClass" in df.columns else "—"),
         "Currency": combined_text.apply(icap_infer_currency),
         "Notional_Local": df["Notional"] if "Notional" in df.columns else 0,
         "Notional_USD": pd.NA,
@@ -1046,8 +968,7 @@ def _standardize_icap_rows(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def parse_icap(html_text: str) -> pd.DataFrame:
-    tables = extract_tables(html_text)
-    tables = [t for t in tables if len(t) > 1]
+    tables = [t for t in extract_tables(html_text) if len(t) > 1]
     if not tables:
         raise ValueError("No data table found on the page")
     best = max(tables, key=len)
@@ -1059,48 +980,53 @@ def parse_icap(html_text: str) -> pd.DataFrame:
 
 
 def parse_icap_numbers(raw_bytes: bytes) -> pd.DataFrame:
-    """Parses a manually-exported Apple Numbers (.numbers) file of the same
-    tpSEF daily activity table. Requires 'numbers-parser' (not stdlib)."""
     from numbers_parser import Document
     import tempfile
-    import os
     with tempfile.NamedTemporaryFile(suffix=".numbers", delete=False) as tmp:
         tmp.write(raw_bytes)
         tmp_path = tmp.name
     try:
         doc = Document(tmp_path)
-        table = doc.sheets[0].tables[0]
-        rows = table.rows(values_only=True)
+        rows = doc.sheets[0].tables[0].rows(values_only=True)
     finally:
         os.unlink(tmp_path)
-    header, data_rows = rows[0], rows[1:]
-    df = pd.DataFrame(data_rows, columns=header)
+    df = pd.DataFrame(rows[1:], columns=rows[0])
     df.columns = [str(c).strip() for c in df.columns]
     return _standardize_icap_rows(df)
 
 
+def parse_icap_any(raw_bytes: bytes, filename: str) -> pd.DataFrame:
+    """Accepts a .numbers export, a saved .html copy of the tpSEF page, or a
+    .csv/.xlsx with the same columns — so a missed day can always be filed."""
+    name = (filename or "").lower()
+    if name.endswith(".numbers"):
+        return parse_icap_numbers(raw_bytes)
+    if name.endswith((".html", ".htm")):
+        return parse_icap(raw_bytes.decode("utf-8", errors="ignore"))
+    if name.endswith((".xlsx", ".xls")):
+        df = pd.read_excel(io.BytesIO(raw_bytes))
+        df.columns = [str(c).strip() for c in df.columns]
+        return _standardize_icap_rows(df)
+    df = pd.read_csv(io.BytesIO(raw_bytes))
+    df.columns = [str(c).strip() for c in df.columns]
+    # An already-standardized snapshot CSV round-trips as-is.
+    if {"SEF", "Tenor", "Category", "Notional_Local"}.issubset(set(df.columns)):
+        return df
+    return _standardize_icap_rows(df)
+
+
 # ═════════════════════════════════════════════════════════════════════════
-# FETCHERS (network layer — cached so we don't re-download on every click)
+# FETCHERS
 # ═════════════════════════════════════════════════════════════════════════
 BROWSER_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
                   "(KHTML, like Gecko) Version/17.4.1 Safari/605.1.15",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
     "Connection": "keep-alive",
     "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
 }
-
-# BGC and GFI need a warm session — visit the homepage first so the server
-# sees a realistic referrer and any session cookies before requesting the file.
-SITE_HOMEPAGES = {
-    "BGC": "https://www.bgcsef.com/",
-    "GFI": "https://www.gfigroup.com/",
-}
+SITE_HOMEPAGES = {"BGC": "https://www.bgcsef.com/", "GFI": "https://www.gfigroup.com/"}
 
 
 def _make_session(homepage: str) -> requests.Session:
@@ -1115,20 +1041,13 @@ def _make_session(homepage: str) -> requests.Session:
 
 
 def _fetch_protected(url: str, homepage: str):
-    """Fetch a file from a bot-protected site (GFI/BGC), trying the most
-    capable method available and falling back gracefully:
-      1. cloudscraper — solves Cloudflare-style browser checks (if installed)
-      2. warmed requests.Session — homepage visit first for cookies+referer
-    Returns the response of whichever attempt got a 200 first, else the
-    last response so the caller can report the real status code."""
+    """GFI/BGC sit behind bot protection: try cloudscraper if installed, then
+    a warmed session."""
     last_r = None
-    # Attempt 1: cloudscraper (optional dependency — add 'cloudscraper' to
-    # requirements.txt to enable; skipped automatically if not installed)
     try:
         import cloudscraper
         scraper = cloudscraper.create_scraper(
-            browser={"browser": "chrome", "platform": "darwin", "mobile": False}
-        )
+            browser={"browser": "chrome", "platform": "darwin", "mobile": False})
         try:
             scraper.get(homepage, timeout=15)
         except Exception:
@@ -1137,15 +1056,10 @@ def _fetch_protected(url: str, homepage: str):
         if r.status_code == 200:
             return r
         last_r = r
-    except ImportError:
-        pass
     except Exception:
         pass
-    # Attempt 2: warmed plain session
     r = _make_session(homepage).get(url, timeout=25)
-    if r.status_code == 200:
-        return r
-    return last_r if last_r is not None else r
+    return r if r.status_code == 200 else (last_r if last_r is not None else r)
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -1160,18 +1074,18 @@ def fetch_source(sef_name: str, url: str, kind: str, report_date_str: str):
     if r.status_code == 404:
         return None, "No file for this date (market may have been closed)."
     if r.status_code == 403:
-        return None, "Site blocked the request (HTTP 403) — the server may require a login or block automated access entirely."
+        return None, "Blocked (HTTP 403) — the site refused an automated request."
     if r.status_code != 200:
         return None, f"HTTP {r.status_code}"
     try:
         report_date = datetime.strptime(report_date_str, "%Y%m%d")
         if kind == "tradition":
             return parse_tradition(r.text), None
-        elif kind == "latam":
+        if kind == "latam":
             return parse_latam(r.text), None
-        elif kind == "gfi_bgc":
+        if kind == "gfi_bgc":
             return parse_gfi_bgc(r.content, sef_name, report_date), None
-        elif kind == "icap":
+        if kind == "icap":
             return parse_icap(r.text), None
     except Exception as e:
         return None, f"Parse error: {e}"
@@ -1182,12 +1096,12 @@ def fetch_uploaded(sef_name: str, kind: str, uploaded_file, report_date: datetim
     try:
         if kind == "gfi_bgc":
             return parse_gfi_bgc(uploaded_file.read(), sef_name, report_date), None
-        elif kind == "latam":
+        if kind == "latam":
             return parse_latam(uploaded_file.read().decode("utf-8")), None
-        elif kind == "tradition":
+        if kind == "tradition":
             return parse_tradition(uploaded_file.read().decode("utf-8")), None
-        elif kind == "icap":
-            return parse_icap_numbers(uploaded_file.read()), None
+        if kind == "icap":
+            return parse_icap_any(uploaded_file.read(), uploaded_file.name), None
     except ImportError:
         return None, "Missing package — run: pip install numbers-parser"
     except Exception as e:
@@ -1195,38 +1109,25 @@ def fetch_uploaded(sef_name: str, kind: str, uploaded_file, report_date: datetim
     return None, "Unsupported upload kind"
 
 
-# Historical fetches (for month-to-date) — past days' files never change,
-# so cache them for a full day instead of 30 minutes.
 @st.cache_data(ttl=86400, show_spinner=False, max_entries=400)
 def fetch_source_hist(sef_name: str, url: str, kind: str, report_date_str: str):
     return fetch_source(sef_name, url, kind, report_date_str)
 
 
 # ═════════════════════════════════════════════════════════════════════════
-# ICAP DAILY SNAPSHOTS
+# ICAP DAILY SNAPSHOTS — one file per day, never combined
 # ═════════════════════════════════════════════════════════════════════════
-# The tpSEF page has no date in the URL — it ONLY ever shows the latest
-# business day. So each day the app successfully pulls ICAP, it saves that
-# day's parsed table to disk. Selecting a past date then loads the saved
-# snapshot, making ICAP history available from the first day the app ran.
-# NOTE: on Streamlit Community Cloud the disk is wiped whenever the app is
-# redeployed or rebooted — snapshots are durable on a local machine, best-
-# effort on the cloud.
-import os
-
-ICAP_SNAPSHOT_DIR = "icap_snapshots"
-
-
 def _icap_snapshot_path(d: datetime) -> str:
     return os.path.join(ICAP_SNAPSHOT_DIR, f"icap_{d.strftime('%Y%m%d')}.csv")
 
 
-def save_icap_snapshot(df: pd.DataFrame, d: datetime):
+def save_icap_snapshot(df: pd.DataFrame, d: datetime) -> bool:
     try:
         os.makedirs(ICAP_SNAPSHOT_DIR, exist_ok=True)
         df.to_csv(_icap_snapshot_path(d), index=False)
+        return True
     except Exception:
-        pass  # snapshot saving must never break the dashboard
+        return False
 
 
 def load_icap_snapshot(d: datetime):
@@ -1246,25 +1147,188 @@ def load_icap_snapshot(d: datetime):
         return None
 
 
+def list_icap_snapshots():
+    if not os.path.isdir(ICAP_SNAPSHOT_DIR):
+        return []
+    out = []
+    for f in sorted(os.listdir(ICAP_SNAPSHOT_DIR)):
+        m = re.fullmatch(r'icap_(\d{8})\.csv', f)
+        if m:
+            out.append(datetime.strptime(m.group(1), "%Y%m%d"))
+    return sorted(out)
+
+
+def ensure_todays_icap_snapshot() -> bool:
+    """Capture the latest tpSEF page on EVERY app load, whatever date is
+    selected. Returns True if a new file was written."""
+    d = last_business_day()
+    if os.path.exists(_icap_snapshot_path(d)):
+        return False
+    try:
+        df, _ = fetch_source("ICAP", SOURCES["ICAP"]["url_template"], "icap", d.strftime("%Y%m%d"))
+        if df is not None and not df.empty:
+            return save_icap_snapshot(df, d)
+    except Exception:
+        pass
+    return False
+
+
 def get_icap_for_date(cfg: dict, sel_date: datetime):
-    """Live fetch (and snapshot) when the selected date is the latest
-    business day; otherwise serve the saved snapshot for that date."""
-    is_latest = sel_date.date() == last_business_day().date()
-    if is_latest:
+    if sel_date.date() == last_business_day().date():
         df, err = fetch_source("ICAP", cfg["url_template"], "icap", sel_date.strftime("%Y%m%d"))
         if df is not None:
             save_icap_snapshot(df, sel_date)
             return df, None
         snap = load_icap_snapshot(sel_date)
-        if snap is not None:
-            return snap, None
-        return None, err
+        return (snap, None) if snap is not None else (None, err)
     snap = load_icap_snapshot(sel_date)
     if snap is not None:
         return snap, None
-    return None, ("No saved ICAP snapshot for this date — the tpSEF page only shows the "
-                  "latest business day, so ICAP history is available from the first day "
-                  "this app saved a snapshot onward.")
+    return None, ("No ICAP snapshot saved for this date. tpSEF only ever shows the latest "
+                  "business day, so this one can't be re-fetched — upload an export under "
+                  "Sidebar → ICAP history → Backfill a past date.")
+
+
+def missing_history_days(since: datetime = HISTORY_START):
+    """Business days from `since` to the last business day with no ICAP file."""
+    have = {d.date() for d in list_icap_snapshots()}
+    out, d, end = [], since, last_business_day()
+    while d.date() <= end.date():
+        if d.weekday() < 5 and d.date() not in have:
+            out.append(d)
+        d += timedelta(days=1)
+    return out
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# GITHUB SYNC — pull at startup, push new days (survives Cloud redeploys)
+# ═════════════════════════════════════════════════════════════════════════
+SYNC_DIRS = [ICAP_SNAPSHOT_DIR, DV01_GRID_DIR]
+
+
+def gh_cfg():
+    """Config comes ONLY from .streamlit/secrets.toml — nothing to type in the
+    app, nothing for anyone to fill in. Add this to secrets.toml locally, and
+    paste the same into the app's Secrets box on Streamlit Cloud:
+
+        [github]
+        repo   = "nminniti7/Mexico-Desk"
+        branch = "main"
+        token  = "ghp_..."          # token needs contents: write
+
+    If it's absent, the app just works off local disk. Best-effort: a failed
+    push or pull never interrupts anything on screen."""
+    try:
+        s = st.secrets.get("github", {})
+    except Exception:
+        s = {}
+    return {
+        "repo": s.get("repo", ""),
+        "branch": s.get("branch", "main") or "main",
+        "token": s.get("token", ""),
+    }
+
+
+def push_day_file(local_path: str, folder: str):
+    """Best-effort push of one day-file. Silent no-op if GitHub isn't set up."""
+    c = gh_cfg()
+    if not (c["repo"] and c["token"] and os.path.exists(local_path)):
+        return False
+    ok, _ = github_push_file(local_path, c["repo"], c["branch"], c["token"],
+                             f"{folder}/{os.path.basename(local_path)}")
+    return ok
+
+
+def _gh_headers(token):
+    h = {"Accept": "application/vnd.github+json"}
+    if token:
+        h["Authorization"] = f"token {token}"
+    return h
+
+
+def github_push_file(local_path, repo, branch, token, remote_path):
+    if not (repo and token and os.path.exists(local_path)):
+        return False, "Missing repo, token, or file."
+    api_url = f"https://api.github.com/repos/{repo}/contents/{remote_path}"
+    try:
+        with open(local_path, "rb") as f:
+            content_b64 = base64.b64encode(f.read()).decode()
+        sha = None
+        r = requests.get(api_url, headers=_gh_headers(token), params={"ref": branch}, timeout=15)
+        if r.status_code == 200:
+            sha = r.json().get("sha")
+        payload = {"message": f"Update {os.path.basename(local_path)}",
+                   "content": content_b64, "branch": branch}
+        if sha:
+            payload["sha"] = sha
+        r = requests.put(api_url, headers=_gh_headers(token), json=payload, timeout=20)
+        if r.status_code in (200, 201):
+            return True, "OK"
+        return False, f"HTTP {r.status_code}: {r.text[:160]}"
+    except Exception as e:
+        return False, str(e)
+
+
+def github_push_dirs(repo, branch, token, only_new=False):
+    ok = fail = 0
+    for d in SYNC_DIRS:
+        if not os.path.isdir(d):
+            continue
+        for fn in sorted(os.listdir(d)):
+            if not fn.endswith(".csv"):
+                continue
+            key = f"{d}/{fn}"
+            if only_new and key in st.session_state.get("gh_pushed", set()):
+                continue
+            success, _ = github_push_file(os.path.join(d, fn), repo, branch, token, key)
+            if success:
+                ok += 1
+                st.session_state.setdefault("gh_pushed", set()).add(key)
+            else:
+                fail += 1
+    return ok, fail
+
+
+def github_pull_dirs(repo, branch, token):
+    """Download any day-files in the repo that aren't on local disk. This is
+    what makes the shared Streamlit link show the full history after a
+    redeploy wipes the container's disk."""
+    pulled = 0
+    for d in SYNC_DIRS:
+        api_url = f"https://api.github.com/repos/{repo}/contents/{d}"
+        try:
+            r = requests.get(api_url, headers=_gh_headers(token), params={"ref": branch}, timeout=20)
+            if r.status_code != 200:
+                continue
+            os.makedirs(d, exist_ok=True)
+            for item in r.json():
+                if item.get("type") != "file" or not item.get("name", "").endswith(".csv"):
+                    continue
+                local = os.path.join(d, item["name"])
+                if os.path.exists(local):
+                    continue
+                raw = requests.get(item["download_url"], headers=_gh_headers(token), timeout=20)
+                if raw.status_code == 200:
+                    with open(local, "wb") as f:
+                        f.write(raw.content)
+                    pulled += 1
+        except Exception:
+            continue
+    return pulled
+
+
+def sync_with_github_once():
+    """Runs once per session: pull history down, capture today, push back up."""
+    if st.session_state.get("gh_synced"):
+        return
+    st.session_state["gh_synced"] = True
+    cfg = gh_cfg()
+    if cfg["repo"]:
+        st.session_state["gh_pulled"] = github_pull_dirs(cfg["repo"], cfg["branch"], cfg["token"])
+    ensure_todays_icap_snapshot()
+    ensure_todays_dv01_grid()
+    if cfg["repo"] and cfg["token"]:
+        github_push_dirs(cfg["repo"], cfg["branch"], cfg["token"], only_new=True)
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -1273,76 +1337,206 @@ def get_icap_for_date(cfg: dict, sel_date: datetime):
 with st.sidebar:
     st.title("🇲🇽 Mexico Desk")
     st.caption("Cross-SEF market comparison")
-    st.markdown("---")
 
+    # ── 1. Date ─────────────────────────────────────────────────────────
+    st.subheader("1 · Trade date")
     auto_date = last_business_day()
-    override = st.checkbox("Select a specific date")
+    override = st.checkbox("Pick a different date", help="Otherwise the last business day is used.")
     if override:
         sel_date = datetime.combine(st.date_input("Trade date", value=auto_date), datetime.min.time())
     else:
         sel_date = datetime.combine(auto_date, datetime.min.time())
-        st.info(f"Auto date: **{auto_date.strftime('%b %d, %Y')}**")
+        st.caption(f"Using **{auto_date:%b %d, %Y}** (last business day)")
 
-    st.markdown("---")
-    st.caption("**Sources**")
+    # ── 2. Metric ───────────────────────────────────────────────────────
+    st.subheader("2 · Compare by")
+    metric_choice = st.radio(
+        "Metric", ["DV01 (USD)", "Notional (as published)", "Trade count"],
+        label_visibility="collapsed",
+        help=("DV01 = MXN notional (mm) ÷ desk grid × 5,000 — MXN rates rows only. "
+              "Notional is whatever the source file says, in the currency it was traded "
+              "in. Nothing is FX-converted anywhere in this app."),
+    )
+    show_exact = st.checkbox("Exact numbers (not 1.23M)", value=True)
+    show_mtd = st.checkbox("Month-to-date share", value=True,
+                           help="Pulls every prior business day this month. First load is slower.")
+
+    # ── 3. DV01 grid (per day) ──────────────────────────────────────────
+    st.subheader("3 · DV01 grid")
+    grid_for_date, grid_label = load_dv01_grid_for_date(sel_date)
+    st.caption(f"**{sel_date:%b %d}** — {grid_label}")
+
+    with st.expander("📋 Paste the desk's grid", expanded=False):
+        st.caption("Copy the tenor + number columns straight out of the email or Excel and "
+                   "paste below. Two columns, one per line. `13x1` period notation, `10 Year`, "
+                   "`10Y`, commas and $ signs all work. A bare column of numbers also works — "
+                   "it maps onto the ladder in order.")
+        pasted = st.text_area(
+            "Paste here",
+            height=140,
+            placeholder="1x1\t11,293.90\n3x1\t3,784.42\n13x1\t896.60\n10Y\t126.22",
+            key=f"paste_{sel_date:%Y%m%d}",
+            label_visibility="collapsed",
+        )
+        if pasted.strip():
+            ladder_order = sorted(grid_for_date.keys(), key=tenor_sort_key)
+            pg, n, bad = parse_pasted_grid(pasted, ladder_order)
+            if not pg:
+                st.error("Couldn't read a single tenor/value pair out of that.")
+            else:
+                prev = pd.DataFrame({"Tenor": sorted(pg.keys(), key=tenor_sort_key)})
+                prev["MXN mm per 5k DV01"] = prev["Tenor"].map(pg)
+                st.caption(f"Read **{len(pg)} tenor(s)**" +
+                           (f" · skipped {len(bad)} line(s) (header/junk)" if bad else ""))
+                st.dataframe(prev, hide_index=True, use_container_width=True, height=200)
+                merge = st.checkbox("Keep tenors I didn't paste", value=True,
+                                    help="On: only the pasted tenors are overwritten. "
+                                         "Off: the grid becomes exactly what you pasted.")
+                if st.button(f"✅ Apply & save for {sel_date:%b %d}", type="primary",
+                             use_container_width=True):
+                    final = {**grid_for_date, **pg} if merge else dict(pg)
+                    if save_dv01_grid_for_date(final, sel_date):
+                        push_day_file(_dv01_path(sel_date), DV01_GRID_DIR)
+                        st.success(f"Saved {len(final)} tenors for {sel_date:%b %d}.")
+                        st.rerun()
+                    else:
+                        st.error("Couldn't save.")
+
+    with st.expander("✏️ Edit one tenor at a time"):
+        _gdf = pd.DataFrame({"Tenor": sorted(grid_for_date.keys(), key=tenor_sort_key)})
+        _gdf["MXN mm per 5k DV01"] = _gdf["Tenor"].map(grid_for_date)
+        edited = st.data_editor(_gdf, num_rows="dynamic", hide_index=True,
+                                key=f"grid_{sel_date:%Y%m%d}", use_container_width=True)
+        dv01_grid = {}
+        for _, r in edited.iterrows():
+            t = str(r.get("Tenor", "")).strip().upper()
+            v = pd.to_numeric(r.get("MXN mm per 5k DV01"), errors="coerce")
+            if t and pd.notna(v) and v > 0:
+                dv01_grid[t] = float(v)
+        if not dv01_grid:
+            dv01_grid = dict(grid_for_date)
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button(f"💾 Save for {sel_date:%b %d}", use_container_width=True):
+                if save_dv01_grid_for_date(dv01_grid, sel_date):
+                    push_day_file(_dv01_path(sel_date), DV01_GRID_DIR)
+                    st.success("Saved.")
+                    st.rerun()
+                else:
+                    st.error("Couldn't save.")
+        with c2:
+            if st.button("↩️ Reset to default", use_container_width=True):
+                save_dv01_grid_for_date(DEFAULT_DV01_GRID, sel_date)
+                st.rerun()
+
+    saved_days = list_dv01_grid_dates()
+    if saved_days:
+        st.caption("Grids on file: " + " · ".join(f"{d:%b %d}" for d in saved_days))
+
+    # ── 4. Sources & history ────────────────────────────────────────────
+    st.subheader("4 · Sources")
     uploaded_files = {}
     for name, cfg in SOURCES.items():
-        if cfg["url_template"] is None:
-            st.caption(f"⬜ {name} — no public URL on file")
-            f = st.file_uploader(f"Upload {name}'s file", key=f"upload_{name}", type=["csv", "xlsx"])
+        st.caption(f"🟢 {name} — auto-fetch")
+    with st.expander("Upload / override a source file"):
+        for name, cfg in SOURCES.items():
+            types = ["numbers", "html", "csv", "xlsx"] if cfg["kind"] == "icap" else ["csv", "xlsx"]
+            f = st.file_uploader(name, key=f"upload_{name}", type=types)
             if f:
                 uploaded_files[name] = f
-        elif cfg["kind"] == "icap":
-            st.caption(f"🟢 {name} — auto-fetch")
-            f = st.file_uploader(
-                f"Optional: override with a {name} .numbers export", key=f"upload_{name}", type=["numbers"]
-            )
-            if f:
-                uploaded_files[name] = f
-        else:
-            st.caption(f"🟢 {name} — auto-fetch")
 
-    st.markdown("---")
-    st.caption("**FX rates (official daily fixing)**")
-    fx_rates, fx_source_label, fx_note, fx_error = fetch_fx_rates(sel_date.strftime("%Y-%m-%d"))
-    if fx_error:
-        st.error(f"⚠️ {fx_error}")
-    else:
-        st.success(f"✅ {fx_source_label}")
-    if fx_note:
-        st.caption(f"ℹ️ {fx_note}")
-    manual_overrides = {}
-    with st.expander("Manual FX — CLP / COP / PEN (not published by the ECB)"):
-        st.caption("These currencies have no free official daily fixing source. "
-                    "Enter units of local currency per 1 USD, or leave at 0 to exclude "
-                    "those trades from USD totals (they'll be flagged as missing, not guessed).")
-        for ccy in EXOTIC_NO_ECB_RATE:
-            v = st.number_input(f"{ccy} per 1 USD", min_value=0.0, value=0.0, step=0.01, key=f"fx_{ccy}")
-            if v > 0:
-                manual_overrides[ccy] = v
+    with st.expander("📅 ICAP history"):
+        snaps = list_icap_snapshots()
+        st.caption(f"**{len(snaps)} day(s) saved** — one file per day, never combined.")
+        if snaps:
+            st.caption(" · ".join(f"{d:%b %d}" for d in snaps))
+        gaps = missing_history_days()
+        if gaps:
+            st.warning("Missing since Jul 09: " + ", ".join(f"{d:%b %d}" for d in gaps))
+            st.caption("tpSEF only shows the latest business day, so past days can't be "
+                       "re-fetched — but you can file an export under any date below.")
+        st.markdown("**Backfill a past date**")
+        bf_date = st.date_input("Date to file it under", value=HISTORY_START, key="bf_date")
+        bf_file = st.file_uploader("ICAP export (.numbers / .html / .csv / .xlsx)",
+                                   key="bf_file", type=["numbers", "html", "csv", "xlsx"])
+        if bf_file and st.button("Save as that day's snapshot"):
+            try:
+                bdf = parse_icap_any(bf_file.read(), bf_file.name)
+                bdt = datetime.combine(bf_date, datetime.min.time())
+                if save_icap_snapshot(bdf, bdt):
+                    push_day_file(_icap_snapshot_path(bdt), ICAP_SNAPSHOT_DIR)
+                    st.success(f"Saved {len(bdf):,} rows for {bdt:%b %d}.")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Couldn't parse that file: {e}")
 
-    st.markdown("---")
-    metric_choice = st.radio("Compare by", ["DV01 (USD)", "USD Notional (converted)", "Local Notional", "Trade count"])
-    if metric_choice == "DV01 (USD)":
-        st.caption("DV01 ≈ USD notional × tenor in years × 1bp (flat-annuity approximation, "
-                   "no discounting) — normalizes short vs. long tenors for volume comparison. "
-                   "Rates products only; the FX tab falls back to USD notional.")
-    show_mtd = st.checkbox("Month-to-date market share", value=True)
-    if show_mtd:
-        st.caption("Pulls every prior business day of the month — first load each day is slower.")
-    show_exact = st.checkbox("Show exact numbers (not abbreviated M/B)", value=True)
-    st.caption("Cached 30 min. Refresh the page to force an update.")
+    # ── 5. Tools ────────────────────────────────────────────────────────
+    st.subheader("5 · Tools")
+    with st.expander("🧮 DV01 / brokerage calculator"):
+        calc_rate = st.number_input("Rate (%)", min_value=0.0, value=6.97, step=0.01, format="%.4f")
+        calc_days = st.number_input("No. of days", min_value=1, value=364, step=28)
+        calc_amt = st.number_input("Amount (MXN)", min_value=0.0, value=3_390_000_000.0,
+                                   step=1_000_000.0, format="%.2f")
+        calc_brk = st.number_input("Brokerage rate", min_value=0.0, value=0.100, step=0.005, format="%.3f")
+        calc_spot = st.number_input("Spot (USDMXN)", min_value=0.0001, value=18.39, step=0.01, format="%.4f")
+        pv01_mxn, n_per = tiie_pv01(calc_amt, calc_rate, int(calc_days))
+        st.markdown(
+            f"**{n_per} × 28-day periods**\n\n"
+            f"PV01: **{pv01_mxn:,.2f} MXN** · **{pv01_mxn/calc_spot:,.2f} USD**\n\n"
+            f"Brokerage: **{pv01_mxn*calc_brk:,.2f} MXN** · **{pv01_mxn*calc_brk/calc_spot:,.2f} USD**"
+        )
+        if calc_amt > 0 and pv01_mxn > 0:
+            grid_equiv = DV01_GRID_BASE / ((pv01_mxn / calc_spot) / (calc_amt / 1e6))
+            st.caption(f"Grid equivalent: **{grid_equiv:,.2f}** MXN mm per 5,000 USD DV01.")
+
 
 numfmt = fmt_exact if show_exact else fmt_m
+
+# Pull history from GitHub, capture today's ICAP + grid, push back. Once per session.
+sync_with_github_once()
+
+# ═════════════════════════════════════════════════════════════════════════
+# HEADER
+# ═════════════════════════════════════════════════════════════════════════
+st.title("Mexico Rates & FX — Cross-SEF Comparison")
+hc1, hc2, hc3 = st.columns([2, 2, 2])
+hc1.caption(f"**Trade date:** {sel_date:%B %d, %Y}")
+hc2.caption(f"**Metric:** {metric_choice}")
+hc3.caption(f"**DV01 grid:** {grid_label}")
+
+with st.expander("ℹ️ How this works (methodology, in one place)"):
+    st.markdown(
+        "**Nothing is FX-converted.** Every notional on screen is exactly what the source file "
+        "publishes, in the currency it was traded in. Currencies are never added together — the "
+        "currency picker shows them one at a time. That's why a bucket total can always be "
+        "reconciled straight against the raw file.\n\n"
+        "**DV01 (USD)** = MXN notional (millions) ÷ the desk grid value for that tenor × 5,000. "
+        "The grid is the desk's own *notional per 5,000 USD DV01* table and moves daily with the "
+        "TIIE curve and USDMXN spot, so it's saved **per day**: pick a past date and you value on "
+        "that day's grid. If it was never edited that day, the last saved grid carries forward and "
+        "says so at the top. Tenors between grid points are interpolated (flagged in the "
+        "drill-down). MXN rates rows only — a non-MXN row or a spread trade with no single tenor "
+        "gets no DV01 rather than an invented one.\n\n"
+        "**Tenors.** MXN TIIE swaps are quoted in 28-day periods, not calendar time — 13 periods "
+        "(364 days) is \"1 year.\" Everything is converted to standard Y/M labels so all five SEFs "
+        "line up on the same row (verified by price match: LatAm's 13x1 and Tradition's \"1 Year\" "
+        "quoted 6.735 the same day). Day-count prints ('182 Days') bucket to their real tenor (6M). "
+        "1W/2W/3W roll into a 0M bucket on the FX ladder; the drill-down always shows the true "
+        "tenor and the bucket side by side.\n\n"
+        "**Tradition notionals** are the GROSS (Non-Delta-Adjusted) columns. Their DA columns apply "
+        "option deltas as whole numbers (50x, not 0.50x), which isn't comparable to what the other "
+        "SEFs publish.\n\n"
+        "**Trade counts.** Tradition and ICAP publish a real count. LatAm, GFI and BGC don't — those "
+        "use row count as a proxy and say so wherever it's shown.\n\n"
+        "**History.** ICAP's page only ever shows the latest business day, so the app saves a "
+        "snapshot every load (`icap_snapshots/icap_YYYYMMDD.csv`) and the DV01 grid the same way "
+        "(`dv01_grids/dv01_YYYYMMDD.csv`) — one file per day, never combined or appended."
+    )
 
 # ═════════════════════════════════════════════════════════════════════════
 # FETCH ALL SOURCES
 # ═════════════════════════════════════════════════════════════════════════
-st.title("Mexico Rates & FX — Cross-SEF Comparison")
-st.caption(f"Trade date: **{sel_date.strftime('%B %d, %Y')}**")
-
-all_data = []
-status_msgs = []
+all_data, status_msgs = [], []
 with st.spinner("Pulling data from all connected SEFs..."):
     for name, cfg in SOURCES.items():
         if name in uploaded_files:
@@ -1351,7 +1545,7 @@ with st.spinner("Pulling data from all connected SEFs..."):
                 status_msgs.append((name, "error", err))
             else:
                 if cfg["kind"] == "icap":
-                    save_icap_snapshot(df, sel_date)  # uploads count as that day's snapshot too
+                    save_icap_snapshot(df, sel_date)
                 all_data.append(df)
                 status_msgs.append((name, "ok", f"{len(df):,} rows (uploaded)"))
         elif cfg["kind"] == "icap":
@@ -1361,96 +1555,78 @@ with st.spinner("Pulling data from all connected SEFs..."):
             else:
                 all_data.append(df)
                 status_msgs.append((name, "ok", f"{len(df):,} rows"))
-        elif cfg["url_template"]:
-            date_str = sel_date.strftime(cfg["date_fmt"]) if cfg["date_fmt"] else ""
-            url = cfg["url_template"].replace("{date}", date_str) if cfg["date_fmt"] else cfg["url_template"]
+        else:
+            date_str = sel_date.strftime(cfg["date_fmt"])
+            url = cfg["url_template"].replace("{date}", date_str)
             df, err = fetch_source(name, url, cfg["kind"], sel_date.strftime("%Y%m%d"))
             if err:
                 status_msgs.append((name, "error", err))
             else:
                 all_data.append(df)
                 status_msgs.append((name, "ok", f"{len(df):,} rows"))
-        else:
-            status_msgs.append((name, "skip", "not connected"))
 
 cols = st.columns(len(SOURCES))
 for i, (name, kind, msg) in enumerate(status_msgs):
     icon = "✅" if kind == "ok" else ("⚠️" if kind == "error" else "⬜")
-    cols[i].caption(f"{icon} **{name}**\n{msg}")
+    cols[i].caption(f"{icon} **{name}** — {msg}")
 
 if not all_data:
-    st.error("No data loaded from any source. Check dates, URLs, or upload files in the sidebar.")
+    st.error("No data loaded from any source. Check the date, or upload files in the sidebar.")
     st.stop()
 
 combined = pd.concat(all_data, ignore_index=True)
-# Reporting bucket: sub-month tenors (ON/TN/SN, day tenors, 1-3 weeks) roll
-# into '0M' for the comparison tables. The original Tenor column is kept
-# untouched so the drill-down always shows the true tenor of each trade.
+
+# Currency must always be a real string. A blank cell in any source file
+# (seen on GFI/BGC) reads back as float NaN, and one stray float here breaks
+# every later sorted()/groupby() that mixes it with real currency codes —
+# that TypeError was what stopped the whole page from rendering.
+combined["Currency"] = (
+    combined["Currency"].astype(str).str.strip().str.upper()
+    .replace({"NAN": "N/A", "NONE": "N/A", "": "N/A", "<NA>": "N/A"})
+)
 combined["Tenor_Bucket"] = combined["Tenor"].astype(str).apply(tenor_bucket)
 combined["Tenor"] = sort_tenors(combined["Tenor"])
-combined = apply_fx(combined, fx_rates, manual_overrides, fx_source_label)
-combined = add_dv01(combined)
+combined = add_dv01(combined, dv01_grid)
 
 if metric_choice == "DV01 (USD)":
     metric_col = "DV01_USD"
-elif metric_choice == "USD Notional (converted)":
-    metric_col = "USD_Notional_Computed"
-elif metric_choice == "Local Notional":
+elif metric_choice == "Notional (as published)":
     metric_col = "Notional_Local"
 else:
     metric_col = "Trades"
 
-missing_fx = combined[combined["USD_Notional_Computed"].isna() & (combined["Currency"] != "N/A")]
-if not missing_fx.empty and metric_col in ("USD_Notional_Computed", "DV01_USD"):
-    miss_ccys = sorted(missing_fx["Currency"].unique())
-    st.warning(
-        f"⚠️ No FX rate available for **{', '.join(miss_ccys)}** — "
-        f"{len(missing_fx)} row(s) totaling {numfmt(missing_fx['Notional_Local'].sum())} (local ccy) "
-        f"are excluded from USD totals below. Add a manual rate in the sidebar to include them."
-    )
 
 # ═════════════════════════════════════════════════════════════════════════
-# COMPARISON TABLE BUILDER
+# TABLES & CHARTS
 # ═════════════════════════════════════════════════════════════════════════
 def build_comparison(data: pd.DataFrame, sefs_present: list, mcol: str, category_label: str) -> pd.DataFrame:
-    """
-    One row per tenor with activity, in ladder order.
-    - IRS: ONLY the desk's standard list (1M,2M,3M,6M,9M, 1Y-10Y, 12Y,15Y,
-      20Y,25Y,30Y). Anything that traded at another tenor rolls into a
-      single 'Other / non-standard tenor' row so totals still reconcile.
-    - FX: the full ladder (0M roll-up, months, years) plus extras.
-    Tenors with NO activity that day are hidden entirely.
-    Every trade lands in exactly one row, so the Total column reconciles
-    with the market-share chart.
-    """
     data = data.copy()
     if category_label == "IRS / Swap":
         ladder = list(IRS_DISPLAY_TENORS)
-        data["Disp_Bucket"] = data["Tenor_Bucket"].where(
-            data["Tenor_Bucket"].isin(ladder), "Other")
+        data["Disp_Bucket"] = data["Tenor_Bucket"].where(data["Tenor_Bucket"].isin(ladder), "Other")
         other_label = "Other / non-standard tenor"
     else:
-        present = [t for t in data["Tenor_Bucket"].unique() if t != "Other"]
-        extras = sorted([t for t in present if t not in FULL_TENOR_LADDER], key=tenor_sort_key)
+        present = [str(t) for t in data["Tenor_Bucket"].unique() if str(t) != "Other"]
+        extras = safe_sorted([t for t in present if t not in FULL_TENOR_LADDER], key=tenor_sort_key)
         ladder = FULL_TENOR_LADDER + extras
         data["Disp_Bucket"] = data["Tenor_Bucket"]
         other_label = "Other / unmatched"
     if (data["Disp_Bucket"] == "Other").any():
         ladder = ladder + ["Other"]
+
     rows = []
     for tenor in ladder:
         t_df = data[data["Disp_Bucket"] == tenor]
         if t_df.empty:
-            continue  # hide tenors with no trades that day
-        label = other_label if tenor == "Other" else tenor_display(tenor)
-        row = {"Tenor": label}
+            continue
+        row = {"Tenor": other_label if tenor == "Other" else tenor_display(tenor)}
         total = 0
         for sef in sefs_present:
             v = t_df[t_df["SEF"] == sef][mcol].sum()
             row[sef] = v
-            total += v if not pd.isna(v) else 0
+            total += 0 if pd.isna(v) else v
         if total == 0:
-            continue  # nothing measurable in this row for the chosen metric
+            continue
         row["Total"] = total
         for sef in sefs_present:
             row[f"{sef} %"] = round(row[sef] / total * 100, 1) if total > 0 else 0
@@ -1458,238 +1634,200 @@ def build_comparison(data: pd.DataFrame, sefs_present: list, mcol: str, category
     return pd.DataFrame(rows)
 
 
-def render_market_share_chart(cat_data: pd.DataFrame, sefs_present: list, category_label: str, currency_label: str,
-                              mcol: str, chart_key: str):
+def render_market_share_chart(cat_data, sefs_present, category_label, currency_label, mcol, chart_key):
     totals = cat_data.groupby("SEF")[mcol].sum().reindex(sefs_present).fillna(0)
     grand_total = totals.sum()
     if grand_total <= 0:
         return
     shares = (totals / grand_total * 100).round(1)
-    st.markdown(f"**Market share % — {category_label} ({currency_label})**")
+    st.markdown(f"**Market share — {category_label} ({currency_label})**")
     pie_df = pd.DataFrame({"SEF": totals.index, "Value": totals.values})
-    color_map = {s: SEF_COLORS.get(s, "#999999") for s in sefs_present}
-    fig = px.pie(
-        pie_df, names="SEF", values="Value",
-        color="SEF", color_discrete_map=color_map, hole=0.35,
-    )
+    fig = px.pie(pie_df, names="SEF", values="Value", color="SEF",
+                 color_discrete_map={s: SEF_COLORS.get(s, "#999999") for s in sefs_present}, hole=0.35)
     fig.update_traces(textposition="inside", textinfo="percent+label", sort=False)
-    fig.update_layout(
-        margin=dict(t=10, b=10, l=10, r=10),
-        height=max(320, 55 * len(sefs_present)),
-        showlegend=True,
-    )
+    fig.update_layout(margin=dict(t=10, b=10, l=10, r=10),
+                      height=max(320, 55 * len(sefs_present)), showlegend=True)
     st.plotly_chart(fig, use_container_width=True, key=chart_key)
-    legend_line = "  ·  ".join(f"**{s}**: {shares[s]}% ({numfmt(totals[s])})" for s in sefs_present)
-    st.caption(legend_line)
+    st.caption("  ·  ".join(f"**{s}**: {shares[s]}% ({numfmt(totals[s])})" for s in sefs_present))
 
 
-def render_currency_breakdown(cat_data: pd.DataFrame):
-    st.markdown("**By original currency → USD converted**")
-    g = cat_data.groupby("Currency").agg(
-        Trades=("Trades", "sum"),
-        Original_Notional=("Notional_Local", "sum"),
-        USD_Notional=("USD_Notional_Computed", "sum"),
-    ).reset_index()
-    g = g.sort_values("USD_Notional", ascending=False, na_position="last")
-    fx_lookup = cat_data.groupby("Currency")["FX_Rate_Used"].first()
-    src_lookup = cat_data.groupby("Currency")["FX_Source"].first()
-    g["FX Rate (CCY per USD)"] = g["Currency"].map(fx_lookup)
-    g["FX Source"] = g["Currency"].map(src_lookup)
-    st.dataframe(
-        g.rename(columns={"Original_Notional": "Original Notional", "USD_Notional": "USD Notional"}).style.format({
-            "Original Notional": numfmt, "USD Notional": numfmt,
-            "FX Rate (CCY per USD)": lambda x: f"{x:,.4f}" if pd.notna(x) else "—",
-            "Trades": "{:,.0f}",
-        }),
-        use_container_width=True, hide_index=True,
+def pick_currency(cat_data, category_label, key_suffix=""):
+    """Notional is NEVER summed across currencies — pick one and show only it.
+    MXN by default when present, otherwise the biggest by notional."""
+    ccys = safe_unique(cat_data["Currency"])
+    ccys = [c for c in ccys if c != "N/A"] or ccys
+    if not ccys:
+        return None
+    if len(ccys) == 1:
+        return ccys[0]
+    if "MXN" in ccys:
+        default = ccys.index("MXN")
+    else:
+        biggest = cat_data.groupby("Currency")["Notional_Local"].sum().idxmax()
+        default = ccys.index(str(biggest)) if str(biggest) in ccys else 0
+    return st.selectbox(
+        "Notional currency", ccys, index=default,
+        key=f"ccy_{category_label}{key_suffix}",
+        help="Straight off the source file — no FX conversion anywhere, so currencies "
+             "are shown one at a time rather than added together.",
     )
 
 
-def render_fx_crosscheck(cat_data: pd.DataFrame, sefs_present: list):
-    rows = []
-    for sef in sefs_present:
-        sef_df = cat_data[cat_data["SEF"] == sef]
-        published = sef_df["Notional_USD"].dropna()
-        if published.empty:
-            continue
-        pub_total = published.sum()
-        calc_total = sef_df.loc[published.index, "USD_Notional_Computed"].sum()
-        diff_pct = abs(pub_total - calc_total) / pub_total * 100 if pub_total else 0
-        status = "✓ Match" if diff_pct < 1.0 else f"⚠ {diff_pct:.1f}% diff"
-        rows.append({"SEF": sef, "Published USD (by source)": pub_total,
-                      "Calculated USD (our FX)": calc_total, "Status": status})
-    if rows:
-        st.markdown("**FX cross-check** — vs. sources that publish their own USD-converted figure")
-        cc_df = pd.DataFrame(rows)
-        st.dataframe(
-            cc_df.style.format({"Published USD (by source)": numfmt, "Calculated USD (our FX)": numfmt}),
-            use_container_width=True, hide_index=True,
-        )
-
-
-def render_section(data: pd.DataFrame, category_label: str, sefs_present: list, group_label: str,
-                   mtd_data=None):
+def render_section(data, category_label, sefs_present, group_label, mtd_data=None):
     cat_data = data[data["Category"] == category_label]
     if cat_data.empty:
         st.info(f"No {category_label} data for {group_label}.")
         return
 
-    # DV01 is a rates concept — the FX tab falls back to USD notional.
     mcol, mlabel = metric_col, metric_choice
-    if category_label == "FX" and metric_col == "DV01_USD":
-        mcol, mlabel = "USD_Notional_Computed", "USD Notional (converted)"
-        st.caption("ℹ️ DV01 doesn't apply to FX products — this tab compares by USD notional instead.")
 
-    st.markdown(f"#### {category_label}")
-    if category_label == "IRS / Swap":
-        st.caption(
-            "ℹ️ Mexican TIIE swaps are quoted by number of 28-day periods, not calendar time — "
-            "the market counts 13 periods (364 days) as \"1 year,\" 26 as \"2 years,\" etc. "
-            "Tenors below are converted to standard Y/M labels so every source lines up on the "
-            "same row — verified by price match (e.g. LatAm's 13x1 and Tradition's \"1 Year\" "
-            "both quoted 6.735 the same day)."
-        )
-        if mcol == "DV01_USD":
-            no_dv01 = cat_data[cat_data["DV01_USD"].isna()]
-            if not no_dv01.empty:
-                st.caption(f"ℹ️ {len(no_dv01)} row(s) have no parseable single tenor (spread trades etc.) — "
-                           f"no DV01 can be computed for them, so they're excluded from DV01 comparisons.")
+    # DV01 is a rates concept and the grid is MXN-only — the FX tab compares by
+    # notional as published.
+    if category_label == "FX" and mcol == "DV01_USD":
+        mcol = "Notional_Local"
+        st.caption("DV01 doesn't apply to FX — this tab compares by notional as published.")
 
-    # KPI row — total per SEF, in the currently-selected metric
-    kpi_cols = st.columns(len(sefs_present))
+    ccy = None
+    if mcol == "Notional_Local":
+        ccy = pick_currency(cat_data, category_label)
+        if ccy:
+            cat_data = cat_data[cat_data["Currency"] == ccy]
+        mlabel = f"Notional ({ccy}, as published)"
+
+    if cat_data.empty:
+        st.info("Nothing traded in that currency on this date.")
+        return
+
+    if mcol == "DV01_USD":
+        no_dv01 = cat_data[cat_data["DV01_USD"].isna()]
+        if not no_dv01.empty:
+            st.caption(f"{len(no_dv01)} row(s) get no DV01 — non-MXN rates rows and spread "
+                       f"trades with no single tenor. They're excluded rather than approximated.")
+
+    # KPI row
     totals = cat_data.groupby("SEF")[mcol].sum()
     grand_total = totals.sum()
+    kpi_cols = st.columns(len(sefs_present))
+    unit = ("" if mcol == "Trades" else (" USD DV01" if mcol == "DV01_USD" else f" {ccy}"))
     for i, sef in enumerate(sefs_present):
         v = totals.get(sef, 0)
-        if mlabel == "Trade count":
-            unit = ""
-        elif mlabel.startswith("DV01"):
-            unit = " USD DV01"
-        elif mlabel.startswith("USD"):
-            unit = " USD"
-        else:
-            unit = " (local ccy)"
         share = round(v / grand_total * 100, 1) if grand_total > 0 else 0
         kpi_cols[i].metric(sef, f"{share}%", f"{numfmt(v)}{unit}")
 
-    render_market_share_chart(cat_data, sefs_present, category_label, f"{group_label} — today",
-                              mcol, chart_key=f"pie_day_{category_label}")
+    render_market_share_chart(cat_data, sefs_present, category_label, "today", mcol,
+                              chart_key=f"pie_day_{category_label}")
 
-    # Month-to-date market share
     if mtd_data is not None:
         mtd_cat = mtd_data[mtd_data["Category"] == category_label]
-        if not mtd_cat.empty:
-            mtd_mcol = mcol if mcol in mtd_cat.columns else "USD_Notional_Computed"
-            days_covered = sorted(mtd_cat["Date"].unique())
-            st.markdown("")
+        if ccy:
+            mtd_cat = mtd_cat[mtd_cat["Currency"] == ccy]
+        if not mtd_cat.empty and mcol in mtd_cat.columns:
+            days_covered = safe_sorted(mtd_cat["Date"].unique())
             render_market_share_chart(
                 mtd_cat, sefs_present, category_label,
-                f"Month-to-date · {days_covered[0]} → {days_covered[-1]} · {len(days_covered)} day(s)",
-                mtd_mcol, chart_key=f"pie_mtd_{category_label}")
+                f"month-to-date · {days_covered[0]} → {days_covered[-1]} · {len(days_covered)} day(s)",
+                mcol, chart_key=f"pie_mtd_{category_label}")
             if "ICAP" not in mtd_cat["SEF"].unique():
-                st.caption("ℹ️ ICAP joins the month-to-date view as daily snapshots accumulate "
-                           "(the tpSEF page only ever shows the latest day).")
+                st.caption("ICAP joins the MTD view as daily snapshots accumulate.")
 
-    st.markdown("")
-    render_currency_breakdown(cat_data)
-
-    st.markdown("")
-    render_fx_crosscheck(cat_data, sefs_present)
-
-    # Tenor-ladder comparison table (traded tenors only)
-    st.markdown("")
+    # Tenor ladder
     comp = build_comparison(cat_data, sefs_present, mcol, category_label)
     if comp.empty:
         st.info("No rows with a measurable value for the chosen metric.")
         return
     display_cols = ["Tenor"] + sefs_present + ["Total"] + [f"{s} %" for s in sefs_present]
-    if category_label == "IRS / Swap":
-        ladder_note = ("IRS ladder: 1M, 2M, 3M, 6M, 9M, 1Y-10Y, 12Y, 15Y, 20Y, 25Y, 30Y — "
-                       "only tenors that actually traded are shown; anything at a non-standard "
-                       "tenor rolls into the 'Other / non-standard tenor' row so totals reconcile")
-    else:
-        ladder_note = ("FX ladder: 0M (1W/2W/3W), months, years — only tenors that actually "
-                       "traded are shown; a final 'Other / unmatched' row catches anything "
-                       "the parser couldn't bucket")
-    st.caption(f"{ladder_note} — {len(comp)} row(s) for {category_label} in {group_label} — "
-               f"values in **{mlabel}**")
+    st.markdown(f"**Tenor ladder — {len(comp)} row(s), values in {mlabel}**")
     st.dataframe(
         comp[display_cols].style.format({**{s: numfmt for s in sefs_present}, "Total": numfmt,
-                                          **{f"{s} %": "{:.1f}%" for s in sefs_present}}),
+                                         **{f"{s} %": "{:.1f}%" for s in sefs_present}}),
         use_container_width=True, hide_index=True,
         height=min(35 * (len(comp) + 1) + 3, 900),
     )
 
-    # Reconciliation check — the ladder rows must account for every trade
-    # with a measurable value for the chosen metric.
     table_total = comp["Total"].sum()
-    chart_total = grand_total if not pd.isna(grand_total) else 0
+    chart_total = 0 if pd.isna(grand_total) else grand_total
     if chart_total > 0 and abs(table_total - chart_total) / chart_total > 0.001:
-        st.error(
-            f"⚠️ Reconciliation failure: the tenor table totals {numfmt(table_total)} but the "
-            f"market-share chart totals {numfmt(chart_total)} — some trades are being dropped "
-            f"between aggregation steps. This should never happen; check Tenor_Bucket assignment."
-        )
+        st.error(f"⚠️ Reconciliation failure: ladder totals {numfmt(table_total)} vs. chart "
+                 f"{numfmt(chart_total)} — trades are being dropped between steps.")
     else:
-        st.caption(f"✓ Reconciled: tenor table total ({numfmt(table_total)}) matches the market-share chart total.")
+        st.caption(f"✓ Reconciled — ladder total {numfmt(table_total)} matches the chart.")
 
     proxy_sefs = [s for s in sefs_present if cat_data[cat_data["SEF"] == s]["Trades_Estimated"].any()]
-    if proxy_sefs and mlabel == "Trade count":
-        st.caption(f"⚠️ Trade counts for {', '.join(proxy_sefs)} are a proxy (row count) — "
-                   f"these sources don't publish a real trade-count field.")
+    if proxy_sefs and mcol == "Trades":
+        st.caption(f"⚠️ Trade counts for {', '.join(proxy_sefs)} are a row-count proxy — "
+                   f"these sources publish no trade-count field.")
 
-    # ── Individual trades — filtered to THIS category only ────────────────
-    st.markdown("")
+    # ── Individual trades — the one drill-down. Straight from the file. ──
     with st.expander(f"🔍 Individual {category_label} trades"):
-        dcol1, dcol2 = st.columns(2)
+        dcol1, dcol2, dcol3 = st.columns(3)
         with dcol1:
-            drill_sef = st.selectbox("Source", sorted(cat_data["SEF"].unique()),
+            drill_sef = st.selectbox("Source", safe_unique(cat_data["SEF"]),
                                      key=f"drill_sef_{category_label}")
         sef_df = cat_data[cat_data["SEF"] == drill_sef]
         with dcol2:
-            bucket_opts = sorted(sef_df["Tenor_Bucket"].unique(), key=tenor_sort_key)
-            true_opts = sorted(sef_df["Tenor"].astype(str).unique(), key=tenor_sort_key)
+            bucket_opts = safe_sorted(sef_df["Tenor_Bucket"].unique(), key=tenor_sort_key)
+            true_opts = safe_sorted(sef_df["Tenor"].astype(str).unique(), key=tenor_sort_key)
             sef_tenors = ["All tenors"] + list(dict.fromkeys(bucket_opts + true_opts))
             drill_tenor = st.selectbox("Tenor", sef_tenors, key=f"drill_tenor_{category_label}",
                                        format_func=tenor_display)
+        with dcol3:
+            group_rows = st.selectbox("View", ["Every row (raw file)", "Grouped by instrument"],
+                                      key=f"drill_view_{category_label}",
+                                      help="Grouped collapses identical descriptions into one line "
+                                           "with notional summed — how a bucket total is built.")
+
         if drill_tenor == "All tenors":
             detail = sef_df
         else:
-            detail = sef_df[(sef_df["Tenor_Bucket"] == drill_tenor) |
+            detail = sef_df[(sef_df["Tenor_Bucket"].astype(str) == drill_tenor) |
                             (sef_df["Tenor"].astype(str) == drill_tenor)]
-        show_cols = ["Description", "AssetClass", "Currency", "Tenor", "Last_Price", "Notional_Local",
-                     "USD_Notional_Computed", "DV01_USD", "FX_Rate_Used", "FX_Source", "FX_CrossCheck", "Trades"]
-        if category_label == "FX":
-            show_cols.remove("DV01_USD")  # DV01 not meaningful for FX
-        show_cols = [c for c in show_cols if c in detail.columns]
-        st.dataframe(
-            detail[show_cols].rename(columns={
-                "AssetClass": "Asset Class", "Tenor": "True Tenor",
-                "Notional_Local": "Original Notional", "USD_Notional_Computed": "USD Notional",
-                "DV01_USD": "DV01 (USD)",
-                "FX_Rate_Used": "FX Rate (CCY/USD)", "FX_Source": "FX Source", "FX_CrossCheck": "Cross-Check",
-            }),
-            use_container_width=True, hide_index=True,
-        )
-        summary = (f"{len(detail)} row(s) · Total original notional: {numfmt(detail['Notional_Local'].sum())} "
-                   f"· Total USD notional: {numfmt(detail['USD_Notional_Computed'].sum())} ")
+        detail = detail.copy()
+        detail["Tenor"] = detail["Tenor"].astype(str)
+
+        if group_rows == "Grouped by instrument":
+            agg = {"Rows": ("Description", "size"),
+                   "Notional": ("Notional_Local", "sum"),
+                   "Trades": ("Trades", "sum")}
+            if category_label == "IRS / Swap":
+                agg["DV01_USD"] = ("DV01_USD", "sum")
+            shown = (detail.groupby(["Description", "Tenor", "Currency"], as_index=False)
+                     .agg(**agg).sort_values("Notional", ascending=False))
+            fmt = {"Notional": numfmt, "Rows": "{:,.0f}", "Trades": "{:,.0f}"}
+            if "DV01_USD" in shown.columns:
+                fmt["DV01_USD"] = numfmt
+            st.dataframe(shown.rename(columns={"Tenor": "True Tenor", "DV01_USD": "DV01 (USD)"})
+                         .style.format(fmt), use_container_width=True, hide_index=True)
+        else:
+            cols_ = ["Description", "AssetClass", "Currency", "Tenor", "Tenor_Bucket",
+                     "Last_Price", "Notional_Local", "DV01_USD", "DV01_Method", "Trades"]
+            if category_label == "FX":
+                cols_ = [c for c in cols_ if c not in ("DV01_USD", "DV01_Method")]
+            cols_ = [c for c in cols_ if c in detail.columns]
+            st.dataframe(
+                detail[cols_].rename(columns={
+                    "AssetClass": "Asset Class", "Tenor": "True Tenor",
+                    "Tenor_Bucket": "Bucket", "Notional_Local": "Notional (from file)",
+                    "DV01_USD": "DV01 (USD)", "DV01_Method": "DV01 Basis"}),
+                use_container_width=True, hide_index=True)
+
+        by_ccy = detail.groupby("Currency")["Notional_Local"].sum()
+        summary = (f"{len(detail)} row(s) · Notional " +
+                   " · ".join(f"{numfmt(v)} {c}" for c, v in by_ccy.items()))
         if category_label == "IRS / Swap" and "DV01_USD" in detail.columns:
-            summary += f"· Total DV01: {numfmt(detail['DV01_USD'].sum())} USD "
-        summary += f"· Total trades: {int(detail['Trades'].sum())}"
+            summary += f" · DV01 {numfmt(detail['DV01_USD'].sum())} USD"
+        summary += f" · Trades {int(detail['Trades'].sum())}"
         st.caption(summary)
-        st.caption("Asset Class codes: **IR** = interest rates · **CU** = currency/FX · **CD** = credit "
-                   "(taken from the source file where published — GFI, BGC, ICAP — and derived from the "
-                   "product category for Tradition and LatAm, which don't publish a code).")
+        st.caption("Notional is exactly what the source file publishes — nothing converted. "
+                   "Asset class: IR = rates · CU = FX · CD = credit.")
         if detail["Trades_Estimated"].any():
-            st.caption("⚠️ This source doesn't publish individual trade prints — each row above is already a daily aggregate.")
+            st.caption("⚠️ This source publishes daily aggregates, not individual prints.")
 
 
 # ═════════════════════════════════════════════════════════════════════════
-# MONTH-TO-DATE DATA (Mexico products only)
+# MONTH-TO-DATE (each day valued on THAT day's grid)
 # ═════════════════════════════════════════════════════════════════════════
 def _business_days_of_month(sel: datetime):
-    d = sel.replace(day=1)
-    days = []
+    d, days = sel.replace(day=1), []
     while d.date() <= sel.date():
         if d.weekday() < 5:
             days.append(d)
@@ -1698,12 +1836,7 @@ def _business_days_of_month(sel: datetime):
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
-def build_mtd_data(sel_date_str: str, manual_overrides: dict):
-    """Fetch every business day of the month up to (and including) the
-    selected date, keep only Mexico products, convert each day with THAT
-    day's ECB fixing, and compute DV01. Days a source has no file for
-    (holidays, blocked fetches, missing ICAP snapshots) are simply skipped
-    for that source. Historical files are cached for 24h."""
+def build_mtd_data(sel_date_str: str, grid_sig: str):
     sel = datetime.strptime(sel_date_str, "%Y%m%d")
     frames = []
     for d in _business_days_of_month(sel):
@@ -1715,74 +1848,50 @@ def build_mtd_data(sel_date_str: str, manual_overrides: dict):
                 if snap is not None:
                     day_frames.append(snap)
                 continue
-            date_str = d.strftime(cfg["date_fmt"])
-            url = cfg["url_template"].replace("{date}", date_str)
-            df, err = fetch_source_hist(name, url, cfg["kind"], ds)
+            url = cfg["url_template"].replace("{date}", d.strftime(cfg["date_fmt"]))
+            df, _ = fetch_source_hist(name, url, cfg["kind"], ds)
             if df is not None:
                 day_frames.append(df)
         if not day_frames:
             continue
         day = pd.concat(day_frames, ignore_index=True)
+        day["Currency"] = (day["Currency"].astype(str).str.strip().str.upper()
+                           .replace({"NAN": "N/A", "NONE": "N/A", "": "N/A", "<NA>": "N/A"}))
         day = day[day["MXN_Match"]]
         if day.empty:
             continue
-        rates, lbl, _, _ = fetch_fx_rates(d.strftime("%Y-%m-%d"))
-        day = apply_fx(day, rates, manual_overrides, lbl)
-        day = add_dv01(day)
+        day_grid, _ = load_dv01_grid_for_date(d)     # each day on its OWN grid
+        day = add_dv01(day, day_grid)
         day["Date"] = d.strftime("%Y-%m-%d")
         frames.append(day)
-    if not frames:
-        return None
-    return pd.concat(frames, ignore_index=True)
+    return pd.concat(frames, ignore_index=True) if frames else None
 
 
 mtd_data = None
 if show_mtd:
-    with st.spinner("Building month-to-date view (pulls each prior business day — cached after first load)..."):
+    with st.spinner("Building month-to-date view (cached after first load)..."):
         try:
-            mtd_data = build_mtd_data(sel_date.strftime("%Y%m%d"), manual_overrides)
+            grid_sig = str(sorted(dv01_grid.items()))
+            mtd_data = build_mtd_data(sel_date.strftime("%Y%m%d"), grid_sig)
         except Exception as e:
-            st.warning(f"Month-to-date view unavailable: {e}")
-            mtd_data = None
-
+            st.caption(f"Month-to-date view unavailable: {e}")
 
 # ═════════════════════════════════════════════════════════════════════════
 # MEXICO PRODUCTS — IRS / FX
 # ═════════════════════════════════════════════════════════════════════════
 st.markdown("---")
-
-
-def get_mexico_slice(df):
-    return df[df["MXN_Match"]]
-
-
-mexico_df = get_mexico_slice(combined)
+mexico_df = combined[combined["MXN_Match"]]
 if mexico_df.empty:
     st.error("No Mexico products found in any source for this date.")
     st.stop()
 
-sefs_present = sorted(mexico_df["SEF"].unique(), key=lambda s: list(SOURCES.keys()).index(s))
-sub_irs, sub_fx = st.tabs(["📈 IRS / Swap", "💱 FX"])
-with sub_irs:
+sefs_present = sorted(mexico_df["SEF"].astype(str).unique(),
+                      key=lambda s: list(SOURCES.keys()).index(s) if s in SOURCES else 99)
+tab_irs, tab_fx = st.tabs(["📈 IRS / Swap", "💱 FX"])
+with tab_irs:
     render_section(mexico_df, "IRS / Swap", sefs_present, "Mexico Products", mtd_data=mtd_data)
-with sub_fx:
+with tab_fx:
     render_section(mexico_df, "FX", sefs_present, "Mexico Products", mtd_data=mtd_data)
 
-# ═════════════════════════════════════════════════════════════════════════
 st.markdown("---")
-st.caption(
-    "DV01 (USD) ≈ USD notional × tenor in years × 1bp — a flat-annuity approximation with no "
-    "discounting, used to normalize volumes across the curve; not a risk number. "
-    "USD Notional = Original Notional ÷ (official ECB daily reference rate for the currency, "
-    "as of the trade date, via Frankfurter.app). USD figures a source publishes directly "
-    "(Tradition, LatAm) are shown alongside our computed figure so any mismatch is visible "
-    "immediately rather than hidden inside a single blended number. Tradition notionals are "
-    "the GROSS (Non-Delta-Adjusted) figures from their file — their Delta-Adjusted columns "
-    "apply option deltas as whole numbers (50x instead of 0.50x) and aren't comparable to "
-    "the gross notionals other SEFs publish. CLP/COP/PEN require a "
-    "manually-entered rate (sidebar) since the ECB doesn't publish fixings for them — those "
-    "trades are excluded from USD totals, never estimated, until a rate is supplied. "
-    "ICAP history: the tpSEF page only ever shows the latest business day, so the app saves a "
-    "snapshot each day it runs — past dates load from those snapshots (on Streamlit Cloud, "
-    "snapshots persist until the app is redeployed or rebooted)."
-)
+st.caption("Methodology and data-handling notes are in the **How this works** panel at the top.")

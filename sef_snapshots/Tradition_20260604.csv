@@ -1,0 +1,284 @@
+SEF,Tenor,Category,AssetClass,Currency,Notional_Local,Notional_USD,Trades,Trades_Estimated,Last_Price,Description,MXN_Match
+Tradition,1W,FX,CU,NOK,300000000,32100000,1,False,862800.0,1W NOK vs. SEK Call at a strike of 1.0085,False
+Tradition,Other,FX,CU,EUR,125000000,145162496,2,False,110625.0,OD EUR vs. USD Put at a strike of 1.16,False
+Tradition,Other,FX,CU,EUR,50000000,58064996,1,False,96250.0,OD EUR vs. USD Call at a strike of 1.165,False
+Tradition,3M,FX,CU,USD,145000000,145000000,9,False,91750.0,3M USD vs. CAD Put at a delta of 50,False
+Tradition,3M,FX,CU,USD,145000000,145000000,9,False,90500.0,3M USD vs. CAD Call at a delta of 50,False
+Tradition,Other,FX,CU,GBP,30000000,40263000,1,False,100500.0,OD GBP vs. USD Call at a strike of 1.351,False
+Tradition,Other,FX,CU,GBP,30000000,40263000,1,False,225750.0,OD GBP vs. USD Put at a strike of 1.338,False
+Tradition,3M,FX,CU,USD,40000000,40000000,2,False,81750.0,3M USD vs. CNH Put at a delta of 50,False
+Tradition,3M,FX,CU,USD,40000000,40000000,2,False,80625.0,3M USD vs. CNH Call at a delta of 50,False
+Tradition,2M,FX,CU,USD,75000000,75000000,3,False,178125.0,2M USD vs. CAD Put at a delta of 50,False
+Tradition,2M,FX,CU,USD,75000000,75000000,3,False,176875.0,2M USD vs. CAD Call at a delta of 50,False
+Tradition,3M,FX,CU,USD,500000000,500000000,6,False,210000.0,3M USD vs. CAD Put at a strike of 1.42,False
+Tradition,2M,FX,CU,USD,60000000,60000000,1,False,253500.0,2M USD vs. CNH Put at a delta of 50,False
+Tradition,2M,FX,CU,USD,60000000,60000000,1,False,249000.0,2M USD vs. CNH Call at a delta of 50,False
+Tradition,3W,FX,CU,USD,100000000,100000000,2,False,85000.0,3W USD vs. CAD Put at a strike of 1.3975,False
+Tradition,1W,FX,CU,GBP,135000000,181183504,2,False,61875.0,1W GBP vs. USD Call at a strike of 1.3575,False
+Tradition,2W,FX,CU,GBP,90000000,120789000,2,False,202500.0,2W GBP vs. USD Put at a strike of 1.3385,False
+Tradition,2W,FX,CU,USD,5000000,5000000,1,False,30250.0,2W USD vs. MXN Put at a delta of 50,True
+Tradition,2W,FX,CU,USD,5000000,5000000,1,False,30250.0,2W USD vs. MXN Call at a delta of 50,True
+Tradition,2M,FX,CU,USD,100000000,100000000,6,False,72000.0,2M USD vs. CAD Put at a delta of 50,False
+Tradition,2M,FX,CU,USD,100000000,100000000,6,False,71500.0,2M USD vs. CAD Call at a delta of 50,False
+Tradition,2W,FX,CU,EUR,25000000,29032498,2,False,49250.0,2W EUR vs. USD Put at a delta of 50,False
+Tradition,2W,FX,CU,EUR,25000000,29032498,2,False,49000.0,2W EUR vs. USD Call at a delta of 50,False
+Tradition,1Y,FX,CU,EUR,22500000,26129248,2,False,463600.0,1Y EUR vs. MXN Call at a strike of 21.025,True
+Tradition,1Y,FX,CU,EUR,22500000,26129248,2,False,463600.0,1Y EUR vs. MXN Put at a strike of 21.025,True
+Tradition,2W,FX,CU,USD,70000000,70000000,3,False,74250.0,2W USD vs. MXN Call at a strike of 17.15,True
+Tradition,6M,FX,CU,USD,20000000,20000000,1,False,25500.0,6M USD vs. CNH Call at a delta of 10,False
+Tradition,6M,FX,CU,USD,20000000,20000000,1,False,22500.0,6M USD vs. CNH Put at a delta of 10,False
+Tradition,Other,FX,CU,EUR,15000000,17419500,1,False,69375.0,OD EUR vs. USD Put at a delta of 50,False
+Tradition,Other,FX,CU,EUR,15000000,17419500,1,False,66000.0,OD EUR vs. USD Call at a delta of 50,False
+Tradition,2W,FX,CU,EUR,15000000,17419500,1,False,78000.0,2W EUR vs. USD Put at a delta of 50,False
+Tradition,2W,FX,CU,EUR,15000000,17419500,1,False,74625.0,2W EUR vs. USD Call at a delta of 50,False
+Tradition,1M,FX,CU,USD,20000000,20000000,1,False,107500.0,1M USD vs. KRW Put at a delta of 25,False
+Tradition,1M,FX,CU,USD,20000000,20000000,1,False,90000.0,1M USD vs. KRW Call at a delta of 25,False
+Tradition,1M,FX,CU,USD,50000000,50000000,1,False,96250.0,1M USD vs. CAD Put at a delta of 25,False
+Tradition,1M,FX,CU,USD,50000000,50000000,1,False,93750.0,1M USD vs. CAD Call at a delta of 25,False
+Tradition,2M,FX,CU,USD,85500000,85500000,2,False,52725.0,2M USD vs. CAD Put at a delta of 10,False
+Tradition,2M,FX,CU,USD,85500000,85500000,2,False,54150.0,2M USD vs. CAD Call at a delta of 10,False
+Tradition,1M,FX,CU,EUR,150000000,174194992,5,False,175000.0,1M EUR vs. USD Put at a delta of 50,False
+Tradition,1M,FX,CU,EUR,150000000,174194992,5,False,166875.0,1M EUR vs. USD Call at a delta of 50,False
+Tradition,1M,FX,CU,EUR,135000000,156775488,1,False,124875.0,1M EUR vs. USD Put at a delta of 10,False
+Tradition,1M,FX,CU,EUR,135000000,156775488,1,False,118125.0,1M EUR vs. USD Call at a delta of 10,False
+Tradition,2M,FX,CU,USD,10000000,10000000,1,False,181250.0,2M USD vs. KRW Put at a delta of 50,False
+Tradition,2M,FX,CU,USD,10000000,10000000,1,False,171750.0,2M USD vs. KRW Call at a delta of 50,False
+Tradition,1W,FX,CU,EUR,100000000,116129992,2,False,165000.0,1W EUR vs. USD Put at a strike of 1.163,False
+Tradition,1M,FX,CU,EUR,50000000,58064996,2,False,174375.0,1M EUR vs. USD Put at a delta of 50,False
+Tradition,1M,FX,CU,EUR,50000000,58064996,2,False,173125.0,1M EUR vs. USD Call at a delta of 50,False
+Tradition,2M,FX,CU,USD,25000000,25000000,1,False,105000.0,2M USD vs. CNH Put at a delta of 50,False
+Tradition,2M,FX,CU,USD,25000000,25000000,1,False,104375.0,2M USD vs. CNH Call at a delta of 50,False
+Tradition,6M,FX,CU,USD,105000000,105000000,1,False,1494570.0,6M USD vs. CAD Call at a strike of 1.3785,False
+Tradition,6M,FX,CU,USD,105000000,105000000,1,False,1441230.0,6M USD vs. CAD Put at a strike of 1.3785,False
+Tradition,Other,FX,CU,USD,30000000,30000000,1,False,18750.0,ON USD vs. JPY Put at a strike of 160.55,False
+Tradition,Other,FX,CU,USD,30000000,30000000,1,False,27750.0,OD USD vs. JPY Put at a strike of 160.55,False
+Tradition,Other,Other,—,USD,5000000,5000000,1,False,0.0,OD USD vs. CAD Double No Touch 1.34/1.41,False
+Tradition,Other,FX,CU,EUR,130000000,150968992,2,False,6750.0,OD EUR vs. USD Call at a strike of 1.1815,False
+Tradition,1W,FX,CU,EUR,25000000,29032498,1,False,85000.0,1W EUR vs. USD Put at a delta of 50,False
+Tradition,1W,FX,CU,EUR,25000000,29032498,1,False,86875.0,1W EUR vs. USD Call at a delta of 50,False
+Tradition,Other,FX,CU,EUR,150000000,174194992,3,False,21250.0,OD EUR vs. USD Put at a strike of 1.1575,False
+Tradition,1W,FX,CU,EUR,30000000,34839000,1,False,66750.0,1W EUR vs. USD Put at a strike of 1.16,False
+Tradition,1M,FX,CU,USD,84000000,84000000,3,False,115500.0,1M USD vs. MXN Put at a delta of 25,True
+Tradition,1M,FX,CU,USD,75000000,75000000,3,False,78125.0,1M USD vs. MXN Call at a delta of 25,True
+Tradition,1W,FX,CU,USD,25000000,25000000,2,False,49125.0,1W USD vs. JPY Put at a delta of 50,False
+Tradition,1W,FX,CU,USD,25000000,25000000,2,False,50250.0,1W USD vs. JPY Call at a delta of 50,False
+Tradition,2W,FX,CU,USD,25000000,25000000,2,False,85125.0,2W USD vs. JPY Put at a delta of 50,False
+Tradition,2W,FX,CU,USD,25000000,25000000,2,False,84750.0,2W USD vs. JPY Call at a delta of 50,False
+Tradition,6M,FX,CU,AUD,10000000,7124000,1,False,179750.0,6M AUD vs. USD Put at a delta of 50,False
+Tradition,6M,FX,CU,AUD,10000000,7124000,1,False,166000.0,6M AUD vs. USD Call at a delta of 50,False
+Tradition,2W,FX,CU,USD,55000000,55000000,1,False,72875.0,2W USD vs. CAD Put at a delta of 25,False
+Tradition,2W,FX,CU,USD,50000000,50000000,1,False,62500.0,2W USD vs. CAD Call at a delta of 25,False
+Tradition,Other,FX,CU,EUR,75000000,87097496,2,False,420000.0,OD EUR vs. USD Put at a delta of 50,False
+Tradition,Other,FX,CU,EUR,75000000,87097496,2,False,403750.0,OD EUR vs. USD Call at a delta of 50,False
+Tradition,Other,FX,CU,EUR,75000000,87097496,2,False,509375.0,OD EUR vs. USD Put at a delta of 50,False
+Tradition,Other,FX,CU,EUR,75000000,87097496,2,False,481875.0,OD EUR vs. USD Call at a delta of 50,False
+Tradition,6M,FX,CU,EUR,20000000,23225998,1,False,379000.0,6M EUR vs. USD Put at a delta of 50,False
+Tradition,6M,FX,CU,EUR,20000000,23225998,1,False,365000.0,6M EUR vs. USD Call at a delta of 50,False
+Tradition,1M,FX,CU,CAD,50000000,35950000,3,False,30250.0,1M CAD vs. MXN Put at a strike of 12.705,True
+Tradition,1W,FX,CU,EUR,125000000,145162496,2,False,38750.0,1W EUR vs. CHF Call at a strike of 0.92,False
+Tradition,Other,FX,CU,EUR,125000000,145162496,2,False,60000.0,OD EUR vs. CHF Call at a strike of 0.92,False
+Tradition,1M,FX,CU,CAD,50000000,35950000,3,False,39000.0,1M CAD vs. MXN Call at a strike of 12.4,True
+Tradition,2W,FX,CU,USD,25000000,25000000,1,False,32500.0,2W USD vs. CAD Put at a delta of 25,False
+Tradition,2W,FX,CU,USD,25000000,25000000,1,False,30625.0,2W USD vs. CAD Call at a delta of 25,False
+Tradition,6M,FX,CU,USD,45000000,45000000,3,False,136125.0,6M USD vs. CNH Put at a delta of 50,False
+Tradition,6M,FX,CU,USD,45000000,45000000,3,False,132750.0,6M USD vs. CNH Call at a delta of 50,False
+Tradition,Other,FX,CU,USD,30000000,30000000,1,False,24750.0,ON USD vs. CAD Call at a strike of 1.39,False
+Tradition,Other,FX,CU,EUR,30000000,34839000,1,False,297750.0,OD EUR vs. MXN Put at a strike of 20.35,True
+Tradition,Other,FX,CU,USD,354000000,354000000,4,False,5.0609,Spot Next Non-Deliverable Forward - United States Dollar and Brazilian Real,False
+Tradition,7D,Other,—,USD,3000000,3000000,1,False,5.0651,7 Day Non-Deliverable Forward - United States Dollar and Brazilian Real,False
+Tradition,1W,Other,—,USD,130000000,130000000,1,False,5.0659,1 Week Non-Deliverable Forward - United States Dollar and Brazilian Real,False
+Tradition,12D,Other,—,USD,130000000,130000000,1,False,5.068,12 Day Non-Deliverable Forward - United States Dollar and Brazilian Real,False
+Tradition,13D,Other,—,USD,115000000,115000000,1,False,5.0617,13 Day Non-Deliverable Forward - United States Dollar and Brazilian Real,False
+Tradition,28D,Other,—,USD,239000000,239000000,3,False,5.0925,28 Day Non-Deliverable Forward - United States Dollar and Brazilian Real,False
+Tradition,Other,Other,—,USD,47000000,47000000,4,False,890.5,Tomorrow Next Non-Deliverable Forward - United States Dollar and Chilean Peso,False
+Tradition,Other,FX,CU,USD,40000000,40000000,4,False,894.5,Spot Next Non-Deliverable Forward - United States Dollar and Chilean Peso,False
+Tradition,8D,Other,—,USD,22000000,22000000,2,False,891.0,8 Day Non-Deliverable Forward - United States Dollar and Chilean Peso,False
+Tradition,20D,Other,—,USD,30000000,30000000,1,False,896.5,20 Day Non-Deliverable Forward - United States Dollar and Chilean Peso,False
+Tradition,21D,Other,—,USD,30000000,30000000,1,False,896.5,21 Day Non-Deliverable Forward - United States Dollar and Chilean Peso,False
+Tradition,28D,Other,—,USD,30000000,30000000,1,False,895.0,28 Day Non-Deliverable Forward - United States Dollar and Chilean Peso,False
+Tradition,4W,Other,—,USD,30000000,30000000,1,False,895.0,4 Week Non-Deliverable Forward - United States Dollar and Chilean Peso,False
+Tradition,1M,Other,—,USD,115000000,115000000,7,False,894.57,1 Month Non-Deliverable Forward - United States Dollar and Chilean Peso,False
+Tradition,3M,Other,—,USD,50000000,50000000,1,False,894.96,3 Month Non-Deliverable Forward - United States Dollar and Chilean Peso,False
+Tradition,Other,FX,CU,USD,2000000,2000000,1,False,3562.0,Spot Next Non-Deliverable Forward - United States Dollar and Colombian Peso,False
+Tradition,1W,Other,—,USD,123000000,123000000,7,False,3571.0,1 Week Non-Deliverable Forward - United States Dollar and Colombian Peso,False
+Tradition,8D,Other,—,USD,30000000,30000000,1,False,3570.52,8 Day Non-Deliverable Forward - United States Dollar and Colombian Peso,False
+Tradition,13D,Other,—,USD,78000000,78000000,3,False,3572.02,13 Day Non-Deliverable Forward - United States Dollar and Colombian Peso,False
+Tradition,14D,Other,—,USD,15000000,15000000,1,False,3576.0,14 Day Non-Deliverable Forward - United States Dollar and Colombian Peso,False
+Tradition,18D,Other,—,USD,54000000,54000000,3,False,3579.0,18 Day Non-Deliverable Forward - United States Dollar and Colombian Peso,False
+Tradition,22D,Other,—,USD,15000000,15000000,1,False,3582.01,22 Day Non-Deliverable Forward - United States Dollar and Colombian Peso,False
+Tradition,27D,Other,—,USD,28000000,28000000,2,False,3582.36,27 Day Non-Deliverable Forward - United States Dollar and Colombian Peso,False
+Tradition,28D,Other,—,USD,27000000,27000000,1,False,3574.0,28 Day Non-Deliverable Forward - United States Dollar and Colombian Peso,False
+Tradition,29D,Other,—,USD,50000000,50000000,1,False,3586.39,29 Day Non-Deliverable Forward - United States Dollar and Colombian Peso,False
+Tradition,1M,Other,—,USD,207000000,207000000,11,False,3594.0,1 Month Non-Deliverable Forward - United States Dollar and Colombian Peso,False
+Tradition,34D,Other,—,USD,27000000,27000000,1,False,3578.55,34 Day Non-Deliverable Forward - United States Dollar and Colombian Peso,False
+Tradition,2M,Other,—,USD,60000000,60000000,2,False,3617.75,2 Month Non-Deliverable Forward - United States Dollar and Colombian Peso,False
+Tradition,3M,Other,—,USD,10000000,10000000,1,False,3640.0,3 Month Non-Deliverable Forward - United States Dollar and Colombian Peso,False
+Tradition,9M,Other,—,USD,10000000,10000000,1,False,3804.0,9 Month Non-Deliverable Forward - United States Dollar and Colombian Peso,False
+Tradition,13D,Other,—,USD,10000000,10000000,1,False,18060.0,13 Day Non-Deliverable Forward - United States Dollar and Indonesian Rupiah,False
+Tradition,104D,Other,—,USD,10000000,10000000,1,False,18187.0,104 Day Non-Deliverable Forward - United States Dollar and Indonesian Rupiah,False
+Tradition,Other,FX,CU,USD,115000000,115000000,7,False,95.655,Spot Next Non-Deliverable Forward - United States Dollar and Indian Rupee,False
+Tradition,6D,Other,—,USD,59000000,59000000,3,False,95.737,6 Day Non-Deliverable Forward - United States Dollar and Indian Rupee,False
+Tradition,1W,Other,—,USD,32000000,32000000,2,False,95.81,1 Week Non-Deliverable Forward - United States Dollar and Indian Rupee,False
+Tradition,7D,Other,—,USD,49000000,49000000,3,False,95.715,7 Day Non-Deliverable Forward - United States Dollar and Indian Rupee,False
+Tradition,13D,Other,—,USD,612300000,612300030,11,False,95.78,13 Day Non-Deliverable Forward - United States Dollar and Indian Rupee,False
+Tradition,35D,Other,—,USD,7000000,7000000,1,False,95.97,35 Day Non-Deliverable Forward - United States Dollar and Indian Rupee,False
+Tradition,104D,Other,—,USD,580300000,580300030,9,False,96.82,104 Day Non-Deliverable Forward - United States Dollar and Indian Rupee,False
+Tradition,13D,Other,—,USD,50000000,50000000,1,False,1533.0,13 Day Non-Deliverable Forward - United States Dollar and South Korean Won,False
+Tradition,1M,Other,—,USD,350000000,350000000,2,False,1533.6,1 Month Non-Deliverable Forward - United States Dollar and South Korean Won,False
+Tradition,3M,Other,—,USD,350000000,350000000,2,False,1531.85,3 Month Non-Deliverable Forward - United States Dollar and South Korean Won,False
+Tradition,104D,Other,—,USD,50000000,50000000,1,False,1530.55,104 Day Non-Deliverable Forward - United States Dollar and South Korean Won,False
+Tradition,33D,Other,—,USD,5000000,5000000,1,False,490.7,33 Day Non-Deliverable Forward - United States Dollar and Kazakhstan Tenge,False
+Tradition,Other,FX,CU,USD,65000000,65000000,2,False,4.014,Spot Next Non-Deliverable Forward - United States Dollar and Malaysian Ringgit,False
+Tradition,29D,Other,—,USD,10000000,10000000,1,False,4.015,29 Day Non-Deliverable Forward - United States Dollar and Malaysian Ringgit,False
+Tradition,35D,Other,—,USD,55000000,55000000,1,False,4.015,35 Day Non-Deliverable Forward - United States Dollar and Malaysian Ringgit,False
+Tradition,13D,Other,—,USD,30000000,30000000,2,False,3.418,13 Day Non-Deliverable Forward - United States Dollar and Peruvian Nuevo Sol,False
+Tradition,4W,Other,—,USD,109000000,109000000,4,False,3.4199,4 Week Non-Deliverable Forward - United States Dollar and Peruvian Nuevo Sol,False
+Tradition,1M,Other,—,USD,230000000,230000000,7,False,3.411,1 Month Non-Deliverable Forward - United States Dollar and Peruvian Nuevo Sol,False
+Tradition,3M,Other,—,USD,230000000,230000000,7,False,3.4211,3 Month Non-Deliverable Forward - United States Dollar and Peruvian Nuevo Sol,False
+Tradition,104D,Other,—,USD,30000000,30000000,2,False,3.4342,104 Day Non-Deliverable Forward - United States Dollar and Peruvian Nuevo Sol,False
+Tradition,ON,Other,—,USD,15000000,15000000,3,False,74.3,Overnight Non-Deliverable Forward - United States Dollar and Russian Ruble,False
+Tradition,1W,Other,—,USD,15000000,15000000,3,False,74.62,1 Week Non-Deliverable Forward - United States Dollar and Russian Ruble,False
+Tradition,Other,FX,CU,USD,55000000,55000000,3,False,31.495,Spot Next Non-Deliverable Forward - United States Dollar and Taiwan New Dollar,False
+Tradition,7D,Other,—,USD,57000000,57000000,3,False,31.51,7 Day Non-Deliverable Forward - United States Dollar and Taiwan New Dollar,False
+Tradition,1W,Other,—,USD,62000000,62000000,1,False,31.51,1 Week Non-Deliverable Forward - United States Dollar and Taiwan New Dollar,False
+Tradition,13D,Other,—,USD,515000000,515000000,11,False,31.51,13 Day Non-Deliverable Forward - United States Dollar and Taiwan New Dollar,False
+Tradition,1M,Other,—,USD,169000000,169000000,8,False,31.59,1 Month Non-Deliverable Forward - United States Dollar and Taiwan New Dollar,False
+Tradition,35D,Other,—,USD,55000000,55000000,3,False,31.585,35 Day Non-Deliverable Forward - United States Dollar and Taiwan New Dollar,False
+Tradition,2M,Other,—,USD,10000000,10000000,1,False,31.65,2 Month Non-Deliverable Forward - United States Dollar and Taiwan New Dollar,False
+Tradition,104D,Other,—,USD,515000000,515000000,11,False,31.66,104 Day Non-Deliverable Forward - United States Dollar and Taiwan New Dollar,False
+Tradition,10Y,Other,—,EUR,86100000,99987928,1,False,2.9805,10Y EUR AB vs 3M EURIBOR,False
+Tradition,1Y,Other,—,EUR,25000000,29032498,1,False,2.564,1Y EUR AM vs 1M EURIBOR,False
+Tradition,5Y,IRS / Swap,IR,USD,855000000,855000000,4,False,3.91,5Y USD vs SOFR,False
+Tradition,8Y,IRS / Swap,IR,USD,193000000,193000000,1,False,3.99375,8Y USD vs SOFR CME,False
+Tradition,9Y,IRS / Swap,IR,USD,450000000,450000000,2,False,4.018125,9Y USD vs SOFR,False
+Tradition,25Y,IRS / Swap,IR,USD,200000000,200000000,1,False,4.289375,25Y USD vs SOFR,False
+Tradition,5Y,Other,—,EUR,175000000,203227488,2,False,2.88569,GADGET 5Y EUR AB vs 6M EURIBOR,False
+Tradition,5Y,IRS / Swap,IR,EUR,150000000,174194992,1,False,2.605,5Y EUR vs ESTR [LCH],False
+Tradition,10Y,Other,—,EUR,75000000,87097496,2,False,3.07156,GADGET 10Y EUR AB vs 6M EURIBOR,False
+Tradition,8Y,IRS / Swap,IR,USD,248000000,248000000,2,False,3.9845,8Y USD vs SOFR,False
+Tradition,9Y,Other,—,EUR,300000000,348389984,2,False,3.025,9Y EUR AB vs 6M EURIBOR,False
+Tradition,20Y,Other,—,EUR,50000000,58064996,1,False,3.256,20Y EUR AB vs 6M EURIBOR,False
+Tradition,12M,IRS / Swap,IR,USD,1250000000,1250000000,2,False,-1.625,12M USD SOFR vs Fed Funds,False
+Tradition,5Y,Other,—,EUR,440400000,511436480,2,False,2.8725,5Y EUR AB vs 6M EURIBOR,False
+Tradition,10Y,IRS / Swap,IR,USD,161000000,161000000,1,False,4.06375,10Y USD vs SOFR CME,False
+Tradition,12Y,Other,—,EUR,100000000,116129992,1,False,3.1365,12Y EUR AB vs 6M EURIBOR,False
+Tradition,10Y,IRS / Swap,IR,USD,1518000000,1518000000,19,False,4.06967,10Y USD vs SOFR,False
+Tradition,3Y,Other,—,EUR,300000000,348389984,1,False,2.732,3Y EUR AB vs 3M EURIBOR,False
+Tradition,30Y,IRS / Swap,IR,USD,822000000,822000000,17,False,4.2575,30Y USD vs SOFR,False
+Tradition,5Y,Other,—,EUR,150000000,174194992,1,False,2.7325,5Y EUR AM vs 3M EURIBOR,False
+Tradition,20Y,Other,—,EUR,25000000,29032498,1,False,3.1935,20Y EUR AM vs 3M EURIBOR,False
+Tradition,10Y,IRS / Swap,IR,EUR,100000000,116129992,2,False,2.8435,10Y EUR vs ESTR [LCH],False
+Tradition,20Y,Other,—,EUR,50000000,58064996,1,False,3.229,20Y EUR AB vs 3M EURIBOR,False
+Tradition,7Y,IRS / Swap,IR,USD,437000000,437000000,1,False,3.96625,7Y USD vs SOFR,False
+Tradition,4Y,Other,—,EUR,478000000,555101380,3,False,2.8485,4Y EUR AB vs 6M EURIBOR,False
+Tradition,15Y,IRS / Swap,IR,USD,1506000000,1506000000,14,False,4.228125,15Y USD vs SOFR,False
+Tradition,15Y,Other,—,EUR,41800000,48542336,1,False,3.221,15Y EUR AB vs 6M EURIBOR,False
+Tradition,4Y,Other,—,EUR,478000000,555101380,3,False,2.7485,4Y EUR AB vs 3M EURIBOR,False
+Tradition,3M,IRS / Swap,IR,EUR,500000000,580649980,1,False,2.195,3M EUR vs ESTR [LCH],False
+Tradition,9Y,IRS / Swap,IR,USD,350000000,350000000,1,False,4.028125,9Y USD vs SOFR CME,False
+Tradition,12M,IRS / Swap,IR,USD,250000000,250000000,1,False,3.85375,12M USD vs SOFR,False
+Tradition,9Y,Other,—,EUR,300000000,348389984,2,False,2.9495,9Y EUR AB vs 3M EURIBOR,False
+Tradition,10Y,Other,—,EUR,144300000,167575584,2,False,3.0615,10Y EUR AB vs 6M EURIBOR,False
+Tradition,6Y,IRS / Swap,IR,USD,1000000000,1000000000,1,False,3.935625,6Y USD vs SOFR,False
+Tradition,3Y,Other,—,EUR,300000000,348389984,1,False,2.838,3Y EUR AB vs 6M EURIBOR,False
+Tradition,1Y,Other,—,EUR,25000000,29032498,1,False,2.674,1Y EUR AB vs 3M EURIBOR,False
+Tradition,3M,IRS / Swap,IR,USD,3000000000,3000000000,2,False,3.65375,3M USD vs SOFR,False
+Tradition,12Y,IRS / Swap,IR,USD,500000000,500000000,3,False,4.1325,12Y USD vs SOFR,False
+Tradition,5Y,Other,—,EUR,440400000,511436480,2,False,2.777,5Y EUR AB vs 3M EURIBOR,False
+Tradition,20Y,IRS / Swap,IR,USD,1447000000,1447000060,12,False,4.299375,20Y USD vs SOFR,False
+Tradition,10Y,Other,—,EUR,50000000,58064996,1,False,3.0166,JUN '26 -10Y EUR AB vs 6M EURIBOR,False
+Tradition,10Y,Other,—,EUR,100000000,116129992,2,False,2.9505,10Y EUR AM vs 3M EURIBOR,False
+Tradition,20Y,IRS / Swap,IR,EUR,25000000,29032498,1,False,3.1095,20Y EUR vs ESTR [LCH],False
+Tradition,12M,Other,—,USD,500000000,500000000,1,False,19.875,Option is Straddle of 12 Month by 15 Month with Strike 3.96% ; Cap/Floor - 3 Month Secured Overnight Financing Rate (USD),False
+Tradition,1Y,Other,—,USD,225000000,225000000,2,False,45.0,Option is Cap of 1 Year by 2 Year with Strike 3.91% ; Cap/Floor - 3 Month Secured Overnight Financing Rate (USD),False
+Tradition,1Y,Other,—,USD,500000000,500000000,2,False,23.75,Option is Cap of 1 Year by 2 Year with Strike 4.66% ; Cap/Floor - 3 Month Secured Overnight Financing Rate (USD),False
+Tradition,1Y,Other,—,USD,500000000,500000000,1,False,20.0,Option is Cap of 1 Year by 2 Year with Strike 4.92% ; Cap/Floor - 3 Month Secured Overnight Financing Rate (USD),False
+Tradition,1Y,Other,—,USD,500000000,500000000,1,False,15.625,Option is Floor of 1 Year by 2 Year with Strike 2.92% ; Cap/Floor - 3 Month Secured Overnight Financing Rate (USD),False
+Tradition,1Y,Other,—,USD,500000000,500000000,2,False,20.0,Option is Floor of 1 Year by 2 Year with Strike 3.16% ; Cap/Floor - 3 Month Secured Overnight Financing Rate (USD),False
+Tradition,1Y,Other,—,USD,225000000,225000000,2,False,45.0,Option is Floor of 1 Year by 2 Year with Strike 3.91% ; Cap/Floor - 3 Month Secured Overnight Financing Rate (USD),False
+Tradition,3M,IRS / Swap,IR,AUD,1000000000,712400000,1,False,0.0725,3 Month Single Currency Basis Swap - 3 Month AONIA for AUD vs. 3 Month BBSW Rate for AUD,False
+Tradition,1Y,IRS / Swap,IR,AUD,255000000,181662000,1,False,0.09,1 Year Cross Currency Basis Swap - 3 Month AONIA for AUD vs. 3 Month Secured Overnight Financing Rate (USD),False
+Tradition,7Y,IRS / Swap,IR,CLF,2022000,91790312,3,False,1.9,7 Year Cross Currency Basis Swap - 6 Month ICP Rate for CLP vs. 6 Month ICP Rate for CLP,False
+Tradition,8Y,IRS / Swap,IR,CLF,1791000,81303880,3,False,1.98,8 Year Cross Currency Basis Swap - 6 Month ICP Rate for CLP vs. 6 Month ICP Rate for CLP,False
+Tradition,1M,IRS / Swap,IR,EUR,5000000000,5806499800,5,False,-0.0075,1 Month Cross Currency Basis Swap - 3 Month EuroSTR for EUR vs. 3 Month Secured Overnight Financing Rate (USD),False
+Tradition,1Y,IRS / Swap,IR,JPY,154780000000,967529730,5,False,-0.2025,1 Year Cross Currency Basis Swap - 3 Month TONA for JPY vs. 3 Month Secured Overnight Financing Rate (USD),False
+Tradition,15M,IRS / Swap,IR,JPY,20000000000,125020000,1,False,-0.205,15 Month Cross Currency Basis Swap - 3 Month TONA for JPY vs. 3 Month Secured Overnight Financing Rate (USD),False
+Tradition,2Y,IRS / Swap,IR,JPY,65000000000,406315008,3,False,-0.22625,2 Year Cross Currency Basis Swap - 3 Month TONA for JPY vs. 3 Month Secured Overnight Financing Rate (USD),False
+Tradition,3Y,IRS / Swap,IR,JPY,11460000000,71636456,1,False,-0.25,3 Year Cross Currency Basis Swap - 3 Month TONA for JPY vs. 3 Month Secured Overnight Financing Rate (USD),False
+Tradition,5Y,IRS / Swap,IR,JPY,55000000000,343804992,8,False,-0.29125,5 Year Cross Currency Basis Swap - 3 Month TONA for JPY vs. 3 Month Secured Overnight Financing Rate (USD),False
+Tradition,10Y,IRS / Swap,IR,JPY,13920000000,87013920,2,False,-0.345,10 Year Cross Currency Basis Swap - 3 Month TONA for JPY vs. 3 Month Secured Overnight Financing Rate (USD),False
+Tradition,15Y,IRS / Swap,IR,JPY,2730000000,17065228,2,False,-0.3525,15 Year Cross Currency Basis Swap - 3 Month TONA for JPY vs. 3 Month Secured Overnight Financing Rate (USD),False
+Tradition,20Y,IRS / Swap,IR,JPY,16520000000,103266512,8,False,-0.365,20 Year Cross Currency Basis Swap - 3 Month TONA for JPY vs. 3 Month Secured Overnight Financing Rate (USD),False
+Tradition,2Y,IRS / Swap,IR,USD,160500000,160500000,2,False,0.0,2 Year Cross Currency Basis Swap - 1 Month Secured Overnight Financing Rate (USD) vs. 28 Day Funding TIIE for MXN,True
+Tradition,5Y,IRS / Swap,IR,USD,24000000,24000000,1,False,0.0,5 Year Cross Currency Basis Swap - 1 Month Secured Overnight Financing Rate (USD) vs. 28 Day Funding TIIE for MXN,True
+Tradition,5Y,IRS / Swap,IR,USD,11000000,11000000,1,False,0.0,5 Year Cross Currency Basis Swap - 3 Month Secured Overnight Financing Rate (USD) vs. 3 Month SHIR for ILS,False
+Tradition,7Y,IRS / Swap,IR,USD,18500000,18500000,1,False,0.0,7 Year Cross Currency Basis Swap - 1 Month Secured Overnight Financing Rate (USD) vs. 28 Day Funding TIIE for MXN,True
+Tradition,6M,Other,—,CZK,15400000000,739092160,2,False,4.2,6 Month by 9 Month Forward Rate Agreement - 3 Month PRIBOR Rate for CZK,False
+Tradition,9M,Other,—,CZK,15400000000,739092160,2,False,4.325,9 Month by 12 Month Forward Rate Agreement - 3 Month PRIBOR Rate for CZK,False
+Tradition,13D,Other,—,EUR,1000000000,1161299970,2,False,2.344,13 Day by 3 Month Forward Rate Agreement - 3 Month EURIBOR for EUR,False
+Tradition,2M,Other,—,EUR,1000000000,1161299970,1,False,2.515,2 Month by 5 Month Forward Rate Agreement - 3 Month EURIBOR for EUR,False
+Tradition,3M,Other,—,EUR,1000000000,1161299970,2,False,2.588,3 Month by 6 Month Forward Rate Agreement - 3 Month EURIBOR for EUR,False
+Tradition,3M,Other,—,EUR,2000000000,2322599940,3,False,2.779,3 Month by 9 Month Forward Rate Agreement - 6 Month EURIBOR for EUR,False
+Tradition,6M,Other,—,EUR,1300000000,1509689980,2,False,2.877,6 Month by 12 Month Forward Rate Agreement - 6 Month EURIBOR for EUR,False
+Tradition,12M,Other,—,EUR,500000000,580649980,1,False,2.87,12 Month by 18 Month Forward Rate Agreement - 6 Month EURIBOR for EUR,False
+Tradition,15M,Other,—,EUR,500000000,580649980,1,False,2.823,15 Month by 21 Month Forward Rate Agreement - 6 Month EURIBOR for EUR,False
+Tradition,3M,IRS / Swap,IR,AUD,1000000000,712400000,1,False,4.41375,3 Month Overnight Index Swap - 3 Month AONIA for AUD,False
+Tradition,2M,IRS / Swap,IR,CAD,1000000000,719000000,1,False,2.335,2 Month Overnight Index Swap - 2 Month CORRA for CAD,False
+Tradition,1Y,IRS / Swap,IR,CAD,51000000,36669000,1,False,2.51,1 Year Overnight Index Swap - 1 Year CORRA for CAD,False
+Tradition,2Y,IRS / Swap,IR,CAD,250000000,179750000,1,False,2.68939,2 Year Overnight Index Swap - 6 Month CORRA for CAD,False
+Tradition,3Y,IRS / Swap,IR,CAD,394000000,283285984,1,False,2.78,3 Year Overnight Index Swap - 6 Month CORRA for CAD,False
+Tradition,4Y,IRS / Swap,IR,CAD,600000000,431400000,1,False,2.84,4 Year Overnight Index Swap - 6 Month CORRA for CAD,False
+Tradition,5Y,IRS / Swap,IR,CAD,244000000,175436000,1,False,2.8875,5 Year Overnight Index Swap - 6 Month CORRA for CAD,False
+Tradition,30Y,IRS / Swap,IR,CAD,75000000,53925000,2,False,3.46841,30 Year Overnight Index Swap - 6 Month CORRA for CAD,False
+Tradition,1M,IRS / Swap,IR,EUR,36877000000,42825257000,8,False,2.181,1 Month Overnight Index Swap - 1 Month EuroSTR for EUR,False
+Tradition,3M,IRS / Swap,IR,EUR,3000000000,3483899900,5,False,2.395,3 Month Overnight Index Swap - 3 Month EuroSTR for EUR,False
+Tradition,4M,IRS / Swap,IR,EUR,219700000,255137600,1,False,2.247,4 Month Overnight Index Swap - 4 Month EuroSTR for EUR,False
+Tradition,5M,IRS / Swap,IR,EUR,350000000,406454976,1,False,2.291,5 Month Overnight Index Swap - 5 Month EuroSTR for EUR,False
+Tradition,6M,IRS / Swap,IR,EUR,147100000,170827216,1,False,2.327,6 Month Overnight Index Swap - 6 Month EuroSTR for EUR,False
+Tradition,8M,IRS / Swap,IR,EUR,100700000,116942904,1,False,2.415,8 Month Overnight Index Swap - 8 Month EuroSTR for EUR,False
+Tradition,9M,IRS / Swap,IR,EUR,375000000,435487488,1,False,2.43,9 Month Overnight Index Swap - 9 Month EuroSTR for EUR,False
+Tradition,30M,IRS / Swap,IR,EUR,200000000,232259984,4,False,2.547,30 Month Overnight Index Swap - 1 Year EuroSTR for EUR,False
+Tradition,10Y,IRS / Swap,IR,EUR,50000000,58064996,1,False,2.8435,10 Year Overnight Index Swap - 1 Year EuroSTR for EUR,False
+Tradition,1M,IRS / Swap,IR,GBP,5210000000,6992341000,3,False,3.755,1 Month Overnight Index Swap - 1 Month SONIA for GBP,False
+Tradition,3M,IRS / Swap,IR,GBP,3137000000,4210167810,1,False,4.2995,3 Month Overnight Index Swap - 3 Month SONIA for GBP,False
+Tradition,5Y,IRS / Swap,IR,GBP,168100000,225607008,1,False,4.23,5 Year Overnight Index Swap - 1 Year SONIA for GBP,False
+Tradition,7Y,IRS / Swap,IR,GBP,250000000,335524992,1,False,4.315,7 Year Overnight Index Swap - 1 Year SONIA for GBP,False
+Tradition,10Y,IRS / Swap,IR,GBP,93300000,125217936,1,False,4.48,10 Year Overnight Index Swap - 1 Year SONIA for GBP,False
+Tradition,2Y,IRS / Swap,IR,ILS,150000000,51746700,1,False,3.15,2 Year Overnight Index Swap - 1 Year SHIR for ILS,False
+Tradition,3Y,IRS / Swap,IR,ILS,50000000,17248900,1,False,3.14,3 Year Overnight Index Swap - 1 Year SHIR for ILS,False
+Tradition,5Y,IRS / Swap,IR,ILS,160000000,55196480,4,False,3.19,5 Year Overnight Index Swap - 1 Year SHIR for ILS,False
+Tradition,1M,IRS / Swap,IR,JPY,1170000000000,7313670100,5,False,0.96125,1 Month Overnight Index Swap - 1 Month TONA for JPY,False
+Tradition,9M,IRS / Swap,IR,JPY,116500000000,728241470,3,False,1.0675,9 Month Overnight Index Swap - 9 Month TONA for JPY,False
+Tradition,1Y,IRS / Swap,IR,JPY,3000000000,18753000,1,False,1.6925,1 Year Overnight Index Swap - 1 Year TONA for JPY,False
+Tradition,1Y,IRS / Swap,IR,JPY,122000000000,762621950,4,False,1.135,1 Year Overnight Index Swap - 1 Year TONA for JPY,False
+Tradition,5Y,IRS / Swap,IR,JPY,12340000000,77137336,2,False,1.9,5 Year Overnight Index Swap - 1 Year TONA for JPY,False
+Tradition,8Y,IRS / Swap,IR,JPY,8000000000,50008000,2,False,2.24875,8 Year Overnight Index Swap - 1 Year TONA for JPY,False
+Tradition,10Y,IRS / Swap,IR,JPY,3420000000,21378420,2,False,2.4525,10 Year Overnight Index Swap - 1 Year TONA for JPY,False
+Tradition,15Y,IRS / Swap,IR,JPY,1230000000,7688730,1,False,2.85625,15 Year Overnight Index Swap - 1 Year TONA for JPY,False
+Tradition,20Y,IRS / Swap,IR,JPY,8110000000,50695608,4,False,3.1175,20 Year Overnight Index Swap - 1 Year TONA for JPY,False
+Tradition,20Y,IRS / Swap,IR,JPY,5110000000,31942610,1,False,3.10125,20 Year Overnight Index Swap - 1 Year TONA for JPY,False
+Tradition,30Y,IRS / Swap,IR,JPY,4000000000,25004000,1,False,3.31625,30 Year Overnight Index Swap - 1 Year TONA for JPY,False
+Tradition,30Y,IRS / Swap,IR,JPY,4000000000,25004000,1,False,3.30125,30 Year Overnight Index Swap - 1 Year TONA for JPY,False
+Tradition,6M,IRS / Swap,IR,MXN,1900000000,109915000,1,False,6.57,6 Month Overnight Index Swap - 28 Day Funding TIIE for MXN,True
+Tradition,2Y,IRS / Swap,IR,MXN,660000000,38181000,2,False,7.22,2 Year Overnight Index Swap - 28 Day Funding TIIE for MXN,True
+Tradition,5Y,IRS / Swap,IR,MXN,210000000,12148500,1,False,7.845,5 Year Overnight Index Swap - 28 Day Funding TIIE for MXN,True
+Tradition,10Y,IRS / Swap,IR,MXN,125000000,7231250,1,False,8.265,10 Year Overnight Index Swap - 28 Day Funding TIIE for MXN,True
+Tradition,4Y,IRS / Swap,IR,ZAR,946000000,57903716,1,False,7.565,4 Year Overnight Index Swap - 1 Year ZARONIA for ZAR,False
+Tradition,5Y,IRS / Swap,IR,ZAR,2948000000,180444128,4,False,7.645,5 Year Overnight Index Swap - 1 Year ZARONIA for ZAR,False
+Tradition,7Y,IRS / Swap,IR,ZAR,1808000000,110665872,2,False,7.835,7 Year Overnight Index Swap - 1 Year ZARONIA for ZAR,False
+Tradition,10Y,IRS / Swap,IR,ZAR,708000000,43335972,2,False,8.115,10 Year Overnight Index Swap - 1 Year ZARONIA for ZAR,False
+Tradition,1Y,IRS / Swap,IR,CLP,28200000000,3147119870,1,False,4.71,1 Year Interest Rate Swap - 1 Year ICP Rate for CLP,False
+Tradition,2Y,IRS / Swap,IR,CLP,24100000000,2689559810,1,False,4.725,2 Year Interest Rate Swap - 6 Month ICP Rate for CLP,False
+Tradition,5Y,IRS / Swap,IR,CLP,12480000000,1392768000,2,False,4.95,5 Year Interest Rate Swap - 6 Month ICP Rate for CLP,False
+Tradition,7Y,IRS / Swap,IR,CLP,4710000000,525636000,1,False,5.11,7 Year Interest Rate Swap - 6 Month ICP Rate for CLP,False
+Tradition,3Y,IRS / Swap,IR,CZK,560000000,26876080,1,False,4.34,3 Year Interest Rate Swap - 6 Month PRIBOR Rate for CZK,False
+Tradition,6M,IRS / Swap,IR,EUR,4300000000,4993590300,7,False,2.676,6 Month Interest Rate Swap - 3 Month EURIBOR for EUR,False
+Tradition,9Y,IRS / Swap,IR,HUF,2090000000,6855200,1,False,5.1,9 Year Interest Rate Swap - 6 Month BUBOR Rate for HUF,False
+Tradition,2Y,IRS / Swap,IR,NZD,178000000,104414800,1,False,3.465,2 Year Interest Rate Swap - 3 Month BBR-FRA for NZD,False
+Tradition,7Y,IRS / Swap,IR,NZD,129500000,75964704,2,False,4.0225,7 Year Interest Rate Swap - 3 Month BBR-FRA for NZD,False
+Tradition,10Y,IRS / Swap,IR,NZD,137500000,80657504,3,False,4.2275,10 Year Interest Rate Swap - 3 Month BBR-FRA for NZD,False
+Tradition,5Y,IRS / Swap,IR,ZAR,2360000000,144453248,4,False,7.575,5 Year Interest Rate Swap - 3 Month JIBAR for ZAR,False
+Tradition,7Y,IRS / Swap,IR,ZAR,1808000000,110665872,2,False,7.76,7 Year Interest Rate Swap - 3 Month JIBAR for ZAR,False
+Tradition,10Y,IRS / Swap,IR,ZAR,708000000,43335972,2,False,8.03,10 Year Interest Rate Swap - 3 Month JIBAR for ZAR,False
+Tradition,1Y,IRS / Swap,IR,JPY,50000000000,312549984,1,False,38.5,Option is Straddle of 1 Year by 1 Year with Strike 1.6925% ; Swaption - 1 Year TONA for JPY,False
+Tradition,3Y,IRS / Swap,IR,JPY,3000000000,18753000,1,False,426.0,Option is Straddle of 3 Year by 5 Year with Strike 2.703% ; Swaption - 1 Year TONA for JPY,False

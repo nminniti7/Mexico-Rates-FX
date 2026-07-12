@@ -2100,10 +2100,19 @@ def render_section(data, category_label, sefs_present, group_label, mtd_data=Non
         return
     display_cols = ["Tenor"] + sefs_present + ["Total"] + [f"{s} %" for s in sefs_present]
     st.markdown(f"**Tenor ladder — {len(comp)} row(s), values in {mlabel}**")
+    # Pre-format to plain strings instead of handing st.dataframe a pandas
+    # Styler. Styler -> pyarrow serialization is the fragile native step that
+    # segfaults when a fast widget change (e.g. DV01 -> Notional) interrupts a
+    # rerun mid-render on Community Cloud. Plain string columns serialize
+    # simply and don't take the app down.
+    ladder_disp = comp[display_cols].copy()
+    for s in sefs_present:
+        ladder_disp[s] = ladder_disp[s].apply(numfmt)
+        ladder_disp[f"{s} %"] = ladder_disp[f"{s} %"].apply(
+            lambda x: f"{x:.1f}%" if pd.notna(x) else "—")
+    ladder_disp["Total"] = ladder_disp["Total"].apply(numfmt)
     st.dataframe(
-        comp[display_cols].style.format({**{s: numfmt for s in sefs_present}, "Total": numfmt,
-                                         **{f"{s} %": "{:.1f}%" for s in sefs_present}}),
-        width='stretch', hide_index=True,
+        ladder_disp, width='stretch', hide_index=True,
         height=min(35 * (len(comp) + 1) + 3, 900),
     )
 
@@ -2155,11 +2164,16 @@ def render_section(data, category_label, sefs_present, group_label, mtd_data=Non
                 agg["DV01_USD"] = ("DV01_USD", "sum")
             shown = (detail.groupby(["Description", "Tenor", "Currency"], as_index=False)
                      .agg(**agg).sort_values("Notional", ascending=False))
-            fmt = {"Notional": numfmt, "Rows": "{:,.0f}", "Trades": "{:,.0f}"}
-            if "DV01_USD" in shown.columns:
-                fmt["DV01_USD"] = numfmt
-            st.dataframe(shown.rename(columns={"Tenor": "True Tenor", "DV01_USD": "DV01 (USD)"})
-                         .style.format(fmt), width='stretch', hide_index=True)
+            # Same reasoning as the tenor ladder: format to strings, no Styler.
+            shown_disp = shown.copy()
+            shown_disp["Notional"] = shown_disp["Notional"].apply(numfmt)
+            shown_disp["Rows"] = shown_disp["Rows"].apply(lambda x: f"{x:,.0f}")
+            shown_disp["Trades"] = shown_disp["Trades"].apply(lambda x: f"{x:,.0f}")
+            if "DV01_USD" in shown_disp.columns:
+                shown_disp["DV01_USD"] = shown_disp["DV01_USD"].apply(numfmt)
+            st.dataframe(
+                shown_disp.rename(columns={"Tenor": "True Tenor", "DV01_USD": "DV01 (USD)"}),
+                width='stretch', hide_index=True)
         else:
             cols_ = ["Description", "AssetClass", "Currency", "Tenor", "Tenor_Bucket",
                      "Last_Price", "Notional_Local", "DV01_USD", "DV01_Method", "Trades"]

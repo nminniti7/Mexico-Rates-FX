@@ -1105,34 +1105,21 @@ def _make_session(homepage: str) -> requests.Session:
 
 
 def _fetch_protected(url: str, homepage: str):
-    """GFI/BGC sit behind a WAF that fingerprints the TLS handshake itself —
-    plain `requests` (and usually cloudscraper too) get HTTP 403 no matter
-    what headers they send, because Python's TLS handshake doesn't look like
-    a browser's. THE FIX: curl_cffi with Chrome impersonation presents a real
-    Chrome TLS fingerprint and gets through. Order:
-        1. curl_cffi (impersonate='chrome') — the one that actually works
-        2. cloudscraper — only if it happens to be installed (safe to drop
-           from requirements.txt; the import just fails and we move on)
-        3. warmed requests session — last resort
-    curl_cffi MUST be in requirements.txt for this to work on Streamlit Cloud."""
+    """Called ONLY when a plain request came back blocked (403 or a WAF block
+    page) — never on a 404, where the file simply doesn't exist.
+
+    Order matters for stability, not just success rate:
+        1. cloudscraper — pure Python, solves plain-Cloudflare challenges,
+           CANNOT hard-crash the process
+        2. warmed plain-requests session
+        3. curl_cffi (impersonate='chrome') — the strongest tool (real Chrome
+           TLS fingerprint) but a C extension that has hard-crashed
+           (segfaulted) the whole app on Streamlit Cloud. A segfault can't be
+           caught by try/except, so it goes LAST: it only ever runs when
+           everything else has already failed on a genuinely blocked URL."""
     last_r = None
 
-    # 1 — curl_cffi with a real Chrome TLS fingerprint
-    try:
-        from curl_cffi import requests as creq
-        s = creq.Session(impersonate="chrome")
-        try:
-            s.get(homepage, timeout=WARM_TIMEOUT)
-        except Exception:
-            pass
-        r = s.get(url, headers={"Referer": homepage}, timeout=FETCH_TIMEOUT)
-        if r.status_code == 200:
-            return r
-        last_r = r
-    except Exception:
-        pass
-
-    # 2 — cloudscraper (optional)
+    # 1 — cloudscraper (pure Python, safe)
     try:
         import cloudscraper
         scraper = cloudscraper.create_scraper(
@@ -1144,14 +1131,39 @@ def _fetch_protected(url: str, homepage: str):
         r = scraper.get(url, timeout=FETCH_TIMEOUT)
         if r.status_code == 200:
             return r
+        last_r = r
+    except Exception:
+        pass
+
+    # 2 — warmed plain-requests session
+    try:
+        r = _make_session(homepage).get(url, timeout=FETCH_TIMEOUT)
+        if r.status_code == 200:
+            return r
         if last_r is None:
             last_r = r
     except Exception:
         pass
 
-    # 3 — warmed plain-requests session
-    r = _make_session(homepage).get(url, timeout=FETCH_TIMEOUT)
-    return r if r.status_code == 200 else (last_r if last_r is not None else r)
+    # 3 — curl_cffi, last resort only
+    try:
+        from curl_cffi import requests as creq
+        s = creq.Session(impersonate="chrome")
+        try:
+            s.get(homepage, timeout=WARM_TIMEOUT)
+        except Exception:
+            pass
+        r = s.get(url, headers={"Referer": homepage}, timeout=FETCH_TIMEOUT)
+        if r.status_code == 200:
+            return r
+        if last_r is None:
+            last_r = r
+    except Exception:
+        pass
+
+    if last_r is not None:
+        return last_r
+    raise RuntimeError("All fetch methods failed")
 
 
 def _looks_valid(kind: str, resp) -> bool:
@@ -1184,8 +1196,15 @@ def fetch_source(sef_name: str, urls, kind: str, report_date_str: str):
         if resp is not None and resp.status_code == 200 and _looks_valid(kind, resp):
             r = resp
             break
-        # 2 — anti-bot chain, only if the direct request didn't get through
-        if sef_name in SITE_HOMEPAGES:
+        # 2 — anti-bot chain, ONLY when the response looks like a WAF block:
+        # a 403, or a 200 that isn't the data file (block page). A 404 means
+        # the file genuinely isn't there — no TLS fingerprint changes that,
+        # and invoking curl_cffi (a C extension) for nothing is what was
+        # hard-crashing the app on past dates whose files had rolled off.
+        blocked = resp is not None and (
+            resp.status_code == 403 or
+            (resp.status_code == 200 and not _looks_valid(kind, resp)))
+        if blocked and sef_name in SITE_HOMEPAGES:
             try:
                 resp2 = _fetch_protected(url, SITE_HOMEPAGES[sef_name])
                 if resp2.status_code == 200 and _looks_valid(kind, resp2):

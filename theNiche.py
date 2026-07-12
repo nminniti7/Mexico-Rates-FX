@@ -1104,6 +1104,78 @@ def _make_session(homepage: str) -> requests.Session:
     return s
 
 
+class _RawResp:
+    """Minimal stand-in for a requests.Response — just the attributes the rest
+    of the app touches (.status_code / .content / .text). Handed back when a
+    fetch is done in the isolated curl_cffi subprocess below."""
+    def __init__(self, status_code, content):
+        self.status_code = status_code
+        self.content = content or b""
+
+    @property
+    def text(self):
+        return self.content.decode("utf-8", errors="ignore")
+
+
+# Child script for the curl_cffi subprocess. Imports ONLY curl_cffi (never
+# streamlit), does the GET, and writes '<status>\n<base64 body>' to stdout.
+# If curl_cffi segfaults, THIS process dies with signal 11 — the parent sees
+# the non-zero returncode and moves on instead of the whole server going down.
+_CURL_CFFI_CHILD = r'''
+import sys, base64
+url, homepage, warm, fetch = sys.argv[1], sys.argv[2], float(sys.argv[3]), float(sys.argv[4])
+from curl_cffi import requests as creq
+s = creq.Session(impersonate="chrome")
+try:
+    s.get(homepage, timeout=warm)
+except Exception:
+    pass
+r = s.get(url, headers={"Referer": homepage}, timeout=fetch)
+sys.stdout.write(str(r.status_code) + "\n")
+sys.stdout.flush()
+sys.stdout.buffer.write(base64.b64encode(r.content))
+'''
+
+
+def _curl_cffi_allowed() -> bool:
+    """On by default. Set SEF_DISABLE_CURL_CFFI = "1" (Secrets or env) to skip
+    it entirely. The subprocess already makes it crash-safe, so this is just an
+    escape hatch — flip it if you ever want curl_cffi out of the path completely."""
+    val = ""
+    try:
+        val = str(st.secrets.get("SEF_DISABLE_CURL_CFFI", ""))
+    except Exception:
+        val = ""
+    val = val or os.environ.get("SEF_DISABLE_CURL_CFFI", "")
+    return str(val).strip().lower() not in ("1", "true", "yes")
+
+
+def _curl_cffi_isolated(url: str, homepage: str):
+    """Run the curl_cffi fetch in a SEPARATE PROCESS so a segfault in that C
+    extension can't take the Streamlit server down with it. A segfault can't be
+    caught by try/except in-process — it kills the interpreter. In a child it
+    just makes the child exit non-zero, which we detect here and turn into a
+    normal 'this fetch failed' None. Returns a _RawResp on success, else None."""
+    import subprocess
+    import sys
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", _CURL_CFFI_CHILD, url, homepage,
+             str(WARM_TIMEOUT), str(FETCH_TIMEOUT)],
+            capture_output=True,
+            timeout=WARM_TIMEOUT + FETCH_TIMEOUT + 5,
+        )
+    except Exception:
+        return None                        # spawn failure / timeout
+    if proc.returncode != 0 or not proc.stdout:
+        return None                        # non-zero exit == segfault/crash/error
+    try:
+        head, _, body_b64 = proc.stdout.partition(b"\n")
+        return _RawResp(int(head.strip()), base64.b64decode(body_b64))
+    except Exception:
+        return None
+
+
 def _fetch_protected(url: str, homepage: str):
     """Called ONLY when a plain request came back blocked (403 or a WAF block
     page) — never on a 404, where the file simply doesn't exist.
@@ -1145,21 +1217,18 @@ def _fetch_protected(url: str, homepage: str):
     except Exception:
         pass
 
-    # 3 — curl_cffi, last resort only
-    try:
-        from curl_cffi import requests as creq
-        s = creq.Session(impersonate="chrome")
-        try:
-            s.get(homepage, timeout=WARM_TIMEOUT)
-        except Exception:
-            pass
-        r = s.get(url, headers={"Referer": homepage}, timeout=FETCH_TIMEOUT)
-        if r.status_code == 200:
-            return r
-        if last_r is None:
-            last_r = r
-    except Exception:
-        pass
+    # 3 — curl_cffi, last resort only, FENCED OFF IN A SUBPROCESS.
+    # Strongest tool (real Chrome TLS fingerprint) but a C extension that has
+    # SEGFAULTED the whole app on Streamlit Cloud. It now runs in a child
+    # process (_curl_cffi_isolated) so a crash there can't kill the server —
+    # the worst case is this one fetch failing.
+    if _curl_cffi_allowed():
+        r = _curl_cffi_isolated(url, homepage)
+        if r is not None:
+            if r.status_code == 200:
+                return r
+            if last_r is None:
+                last_r = r
 
     if last_r is not None:
         return last_r
@@ -1661,12 +1730,12 @@ with st.sidebar:
                 prev["MXN mm per 5k DV01"] = prev["Tenor"].map(pg)
                 st.caption(f"Read **{len(pg)} tenor(s)**" +
                            (f" · skipped {len(bad)} line(s) (header/junk)" if bad else ""))
-                st.dataframe(prev, hide_index=True, use_container_width=True, height=200)
+                st.dataframe(prev, hide_index=True, width='stretch', height=200)
                 merge = st.checkbox("Keep tenors I didn't paste", value=True,
                                     help="On: only the pasted tenors are overwritten. "
                                          "Off: the grid becomes exactly what you pasted.")
                 if st.button(f"✅ Apply & save for {sel_date:%b %d}", type="primary",
-                             use_container_width=True):
+                             width='stretch'):
                     final = {**grid_for_date, **pg} if merge else dict(pg)
                     if save_dv01_grid_for_date(final, sel_date):
                         push_day_file(_dv01_path(sel_date), DV01_GRID_DIR)
@@ -1679,7 +1748,7 @@ with st.sidebar:
         _gdf = pd.DataFrame({"Tenor": sorted(grid_for_date.keys(), key=tenor_sort_key)})
         _gdf["MXN mm per 5k DV01"] = _gdf["Tenor"].map(grid_for_date)
         edited = st.data_editor(_gdf, num_rows="dynamic", hide_index=True,
-                                key=f"grid_{sel_date:%Y%m%d}", use_container_width=True)
+                                key=f"grid_{sel_date:%Y%m%d}", width='stretch')
         dv01_grid = {}
         for _, r in edited.iterrows():
             t = str(r.get("Tenor", "")).strip().upper()
@@ -1690,7 +1759,7 @@ with st.sidebar:
             dv01_grid = dict(grid_for_date)
         c1, c2 = st.columns(2)
         with c1:
-            if st.button(f"💾 Save for {sel_date:%b %d}", use_container_width=True):
+            if st.button(f"💾 Save for {sel_date:%b %d}", width='stretch'):
                 if save_dv01_grid_for_date(dv01_grid, sel_date):
                     push_day_file(_dv01_path(sel_date), DV01_GRID_DIR)
                     st.success("Saved.")
@@ -1698,7 +1767,7 @@ with st.sidebar:
                 else:
                     st.error("Couldn't save.")
         with c2:
-            if st.button("↩️ Reset to default", use_container_width=True):
+            if st.button("↩️ Reset to default", width='stretch'):
                 save_dv01_grid_for_date(DEFAULT_DV01_GRID, sel_date)
                 push_day_file(_dv01_path(sel_date), DV01_GRID_DIR)
                 st.rerun()
@@ -1941,7 +2010,7 @@ def render_market_share_chart(cat_data, sefs_present, category_label, currency_l
     fig.update_traces(textposition="inside", textinfo="percent+label", sort=False)
     fig.update_layout(margin=dict(t=10, b=10, l=10, r=10),
                       height=max(320, 55 * len(sefs_present)), showlegend=True)
-    st.plotly_chart(fig, use_container_width=True, key=chart_key)
+    st.plotly_chart(fig, width='stretch', key=chart_key)
     st.caption("  ·  ".join(f"**{s}**: {shares[s]}% ({numfmt(totals[s])})" for s in sefs_present))
 
 
@@ -2034,7 +2103,7 @@ def render_section(data, category_label, sefs_present, group_label, mtd_data=Non
     st.dataframe(
         comp[display_cols].style.format({**{s: numfmt for s in sefs_present}, "Total": numfmt,
                                          **{f"{s} %": "{:.1f}%" for s in sefs_present}}),
-        use_container_width=True, hide_index=True,
+        width='stretch', hide_index=True,
         height=min(35 * (len(comp) + 1) + 3, 900),
     )
 
@@ -2090,7 +2159,7 @@ def render_section(data, category_label, sefs_present, group_label, mtd_data=Non
             if "DV01_USD" in shown.columns:
                 fmt["DV01_USD"] = numfmt
             st.dataframe(shown.rename(columns={"Tenor": "True Tenor", "DV01_USD": "DV01 (USD)"})
-                         .style.format(fmt), use_container_width=True, hide_index=True)
+                         .style.format(fmt), width='stretch', hide_index=True)
         else:
             cols_ = ["Description", "AssetClass", "Currency", "Tenor", "Tenor_Bucket",
                      "Last_Price", "Notional_Local", "DV01_USD", "DV01_Method", "Trades"]
@@ -2102,7 +2171,7 @@ def render_section(data, category_label, sefs_present, group_label, mtd_data=Non
                     "AssetClass": "Asset Class", "Tenor": "True Tenor",
                     "Tenor_Bucket": "Bucket", "Notional_Local": "Notional (from file)",
                     "DV01_USD": "DV01 (USD)", "DV01_Method": "DV01 Basis"}),
-                use_container_width=True, hide_index=True)
+                width='stretch', hide_index=True)
 
         by_ccy = detail.groupby("Currency")["Notional_Local"].sum()
         summary = (f"{len(detail)} row(s) · Notional " +

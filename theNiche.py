@@ -68,30 +68,53 @@ st.set_page_config(page_title="Mexico Desk — Cross-SEF Dashboard", page_icon="
 SOURCES = {
     "Tradition": {
         "kind": "tradition",
-        "url_template": "https://www.traditionsef.com/dailyactivity/SEF16_MKTDATA_TFSU_{date}.csv",
+        "url_templates": [
+            "https://www.traditionsef.com/dailyactivity/SEF16_MKTDATA_TFSU_{date}.csv",
+        ],
         "date_fmt": "%Y%m%d",
     },
     "LatAm SEF": {
         "kind": "latam",
-        "url_template": "https://www.latamsef.com/market-data/LatAmSEF_MarketActivityData_{date}.csv",
+        "url_templates": [
+            "http://latamsef.com/market-data/LatAmSEF_MarketActivityData_{date}.csv",     # direct link — works
+            "https://www.latamsef.com/market-data/LatAmSEF_MarketActivityData_{date}.csv",
+        ],
         "date_fmt": "%Y%m%d",
     },
     "GFI": {
         "kind": "gfi_bgc",
-        "url_template": "https://www.gfigroup.com/doc/sef/marketdata/{date}_daily_trade_data.xlsx",
+        "url_templates": [
+            "http://www.gfigroup.com/doc/sef/marketdata/{date}_daily_trade_data.xlsx",    # direct link — works
+            "https://www.gfigroup.com/doc/sef/marketdata/{date}_daily_trade_data.xlsx",
+        ],
         "date_fmt": "%Y-%m-%d",
     },
     "BGC": {
         "kind": "gfi_bgc",
-        "url_template": "https://www.bgcsef.com/TradingActivityReports/Daily/DailyAct_{date}.xlsx",
+        "url_templates": [
+            "https://www.bgcsef.com/TradingActivityReports/Daily/DailyAct_{date}.xlsx",   # direct link — works
+            "http://www.bgcsef.com/TradingActivityReports/Daily/DailyAct_{date}.xlsx",
+        ],
         "date_fmt": "%Y%m%d",
     },
     "ICAP": {
         "kind": "icap",
-        "url_template": "https://www.tullettprebon.com/swap-execution-facility/daily-activity-summary.aspx",
+        "url_templates": [
+            "https://www.tullettprebon.com/swap-execution-facility/daily-activity-summary.aspx",
+        ],
         "date_fmt": None,       # no date in URL — page always shows latest business day
     },
 }
+
+
+def source_urls(cfg: dict, d: datetime) -> tuple:
+    """All candidate URLs for a source on a date — direct link first, then
+    scheme/www variants. Returned as a tuple so it's hashable for caching."""
+    tpls = cfg["url_templates"]
+    if cfg["date_fmt"]:
+        ds = d.strftime(cfg["date_fmt"])
+        return tuple(t.replace("{date}", ds) for t in tpls)
+    return tuple(tpls)
 
 SEF_COLORS = {
     "Tradition": "#1a56db",
@@ -145,6 +168,7 @@ LATAM_PERIOD_TENOR = {
 # CONFIG — PERSISTENCE (one file per day, never combined)
 # ═════════════════════════════════════════════════════════════════════════
 ICAP_SNAPSHOT_DIR = "icap_snapshots"
+SEF_SNAPSHOT_DIR = "sef_snapshots"      # Tradition/LatAm/GFI/BGC daily saves — MTD reads these
 DV01_GRID_DIR = "dv01_grids"
 LEGACY_DV01_FILE = "dv01_grid.csv"      # old single-grid file — still read as a fallback
 HISTORY_START = datetime(2026, 7, 9)    # first day the desk wanted history from
@@ -1104,22 +1128,56 @@ def _fetch_protected(url: str, homepage: str):
     return r if r.status_code == 200 else (last_r if last_r is not None else r)
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
-def fetch_source(sef_name: str, url: str, kind: str, report_date_str: str):
+def _looks_valid(kind: str, resp) -> bool:
+    """A 200 isn't enough — a WAF can serve an HTML block page with status
+    200. An xlsx must start with the ZIP magic bytes 'PK'."""
     try:
+        if kind == "gfi_bgc":
+            return resp.content[:2] == b"PK"
+        return True
+    except Exception:
+        return False
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def fetch_source(sef_name: str, urls, kind: str, report_date_str: str):
+    """Try each candidate URL in order. The direct links off the desk's sheet
+    are FIRST and are tried with a plain request — they just work, no
+    anti-bot dance needed (GFI in particular serves over plain http). The
+    curl_cffi/cloudscraper chain is kept as a fallback per URL."""
+    if isinstance(urls, str):
+        urls = (urls,)
+    r, last_err = None, None
+    for url in urls:
+        # 1 — plain direct request (this is all the desk's links need)
+        try:
+            resp = requests.get(url, headers=BROWSER_HEADERS, timeout=25, allow_redirects=True)
+        except Exception as e:
+            resp, last_err = None, f"Network error: {e}"
+        if resp is not None and resp.status_code == 200 and _looks_valid(kind, resp):
+            r = resp
+            break
+        # 2 — anti-bot chain, only if the direct request didn't get through
         if sef_name in SITE_HOMEPAGES:
-            r = _fetch_protected(url, SITE_HOMEPAGES[sef_name])
-        else:
-            r = requests.get(url, headers=BROWSER_HEADERS, timeout=25)
-    except Exception as e:
-        return None, f"Network error: {e}"
-    if r.status_code == 404:
-        return None, "No file for this date (market may have been closed)."
-    if r.status_code == 403:
-        return None, ("Blocked (HTTP 403) — the site refused an automated request. "
-                      "Make sure curl_cffi is in requirements.txt (that's the fix).")
-    if r.status_code != 200:
-        return None, f"HTTP {r.status_code}"
+            try:
+                resp2 = _fetch_protected(url, SITE_HOMEPAGES[sef_name])
+                if resp2.status_code == 200 and _looks_valid(kind, resp2):
+                    r = resp2
+                    break
+                resp = resp2
+            except Exception as e:
+                last_err = f"Network error: {e}"
+        if resp is not None:
+            if resp.status_code == 404:
+                last_err = "No file for this date (market may have been closed)."
+            elif resp.status_code == 403:
+                last_err = "Blocked (HTTP 403) — every URL variant was refused."
+            elif resp.status_code == 200:
+                last_err = "Got a page, but not the data file (WAF block page)."
+            else:
+                last_err = f"HTTP {resp.status_code}"
+    if r is None:
+        return None, last_err or "Fetch failed"
     try:
         report_date = datetime.strptime(report_date_str, "%Y%m%d")
         if kind == "tradition":
@@ -1153,8 +1211,8 @@ def fetch_uploaded(sef_name: str, kind: str, uploaded_file, report_date: datetim
 
 
 @st.cache_data(ttl=86400, show_spinner=False, max_entries=400)
-def fetch_source_hist(sef_name: str, url: str, kind: str, report_date_str: str):
-    return fetch_source(sef_name, url, kind, report_date_str)
+def fetch_source_hist(sef_name: str, urls, kind: str, report_date_str: str):
+    return fetch_source(sef_name, urls, kind, report_date_str)
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -1214,7 +1272,7 @@ def ensure_todays_icap_snapshot() -> bool:
     if os.path.exists(_icap_snapshot_path(d)):
         return False
     try:
-        df, _ = fetch_source("ICAP", SOURCES["ICAP"]["url_template"], "icap", d.strftime("%Y%m%d"))
+        df, _ = fetch_source("ICAP", source_urls(SOURCES["ICAP"], d), "icap", d.strftime("%Y%m%d"))
         if df is not None and not df.empty:
             return save_icap_snapshot(df, d)   # save_icap_snapshot pushes too
     except Exception:
@@ -1224,7 +1282,7 @@ def ensure_todays_icap_snapshot() -> bool:
 
 def get_icap_for_date(cfg: dict, sel_date: datetime):
     if sel_date.date() == last_business_day().date():
-        df, err = fetch_source("ICAP", cfg["url_template"], "icap", sel_date.strftime("%Y%m%d"))
+        df, err = fetch_source("ICAP", source_urls(cfg, sel_date), "icap", sel_date.strftime("%Y%m%d"))
         if df is not None:
             save_icap_snapshot(df, sel_date)   # saves AND pushes
             return df, None
@@ -1236,6 +1294,46 @@ def get_icap_for_date(cfg: dict, sel_date: datetime):
     return None, ("No ICAP snapshot saved for this date. tpSEF only ever shows the latest "
                   "business day, so this one can't be re-fetched — upload an export under "
                   "Sidebar → ICAP history → Backfill a past date.")
+
+
+def _sef_snapshot_path(sef: str, d: datetime) -> str:
+    safe = re.sub(r'\W+', '', sef)
+    return os.path.join(SEF_SNAPSHOT_DIR, f"{safe}_{d.strftime('%Y%m%d')}.csv")
+
+
+def save_sef_snapshot(df: pd.DataFrame, sef: str, d: datetime) -> bool:
+    """Save any SEF's parsed day-table and push it to the repo — same idea as
+    the ICAP snapshots. This is what makes month-to-date reliable on Streamlit
+    Cloud: GFI/BGC block bursts of requests from datacenter IPs, so re-fetching
+    8 past days on every MTD build silently loses them. Once a day is saved,
+    it's never fetched again. Skips the write if the file already exists."""
+    try:
+        p = _sef_snapshot_path(sef, d)
+        if os.path.exists(p):
+            return True
+        os.makedirs(SEF_SNAPSHOT_DIR, exist_ok=True)
+        df.to_csv(p, index=False)
+        push_day_file(p, SEF_SNAPSHOT_DIR)
+        return True
+    except Exception:
+        return False
+
+
+def load_sef_snapshot(sef: str, d: datetime):
+    p = _sef_snapshot_path(sef, d)
+    if not os.path.exists(p):
+        return None
+    try:
+        df = pd.read_csv(p, dtype=str)
+        for c in ["Notional_Local", "Notional_USD", "Trades", "Last_Price"]:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+        for c in ["MXN_Match", "Trades_Estimated"]:
+            if c in df.columns:
+                df[c] = df[c].astype(str).map({"True": True, "False": False}).fillna(False)
+        return df
+    except Exception:
+        return None
 
 
 def missing_history_days(since: datetime = HISTORY_START):
@@ -1252,32 +1350,41 @@ def missing_history_days(since: datetime = HISTORY_START):
 # ═════════════════════════════════════════════════════════════════════════
 # GITHUB SYNC — pull at startup, push new days (survives Cloud redeploys)
 # ═════════════════════════════════════════════════════════════════════════
-SYNC_DIRS = [ICAP_SNAPSHOT_DIR, DV01_GRID_DIR]
+SYNC_DIRS = [ICAP_SNAPSHOT_DIR, SEF_SNAPSHOT_DIR, DV01_GRID_DIR]
 
 
 def gh_cfg():
-    """Config comes ONLY from .streamlit/secrets.toml — nothing to type in the
-    app, nothing for anyone to fill in. Add this to secrets.toml locally, and
-    paste the same into the app's Secrets box on Streamlit Cloud:
+    """Config comes from .streamlit/secrets.toml, with environment variables
+    as a fallback (GH_REPO / GH_BRANCH / GH_TOKEN).
 
-        [github]
-        repo   = "nminniti7/Mexico-Rates-FX"
-        branch = "main"
-        token  = "ghp_..."          # token needs contents: write
+    ON STREAMLIT CLOUD: paste the [github] block into the app's Secrets box.
 
-    If it's absent, the app just works off local disk. Best-effort: a failed
-    push or pull never interrupts anything on screen — but the sidebar SAYS
-    when sync is off, because on Streamlit Cloud that means history dies on
-    the next redeploy."""
+    ON LOCALHOST: secrets don't follow you from the cloud — create the file
+    yourself, in the SAME folder you run `streamlit run theNiche.py` from:
+
+        mkdir -p .streamlit
+        # then create .streamlit/secrets.toml containing:
+        #   [github]
+        #   repo   = "nminniti7/Mexico-Rates-FX"
+        #   branch = "main"
+        #   token  = "github_pat_..."
+
+    and add `.streamlit/secrets.toml` to .gitignore so the token is never
+    committed (GitHub auto-revokes any token it finds in a push, which kills
+    sync everywhere). Restart streamlit after creating the file.
+
+    If it's absent everywhere, the app just works off local disk. Best-effort:
+    a failed push or pull never interrupts anything on screen — but the
+    sidebar SAYS when sync is off, because on Streamlit Cloud that means
+    history dies on the next redeploy."""
     try:
         s = st.secrets.get("github", {})
     except Exception:
         s = {}
-    return {
-        "repo": s.get("repo", ""),
-        "branch": s.get("branch", "main") or "main",
-        "token": s.get("token", ""),
-    }
+    repo = s.get("repo", "") or os.environ.get("GH_REPO", "")
+    branch = s.get("branch", "") or os.environ.get("GH_BRANCH", "") or "main"
+    token = s.get("token", "") or os.environ.get("GH_TOKEN", "")
+    return {"repo": repo, "branch": branch, "token": token}
 
 
 def push_day_file(local_path: str, folder: str):
@@ -1615,6 +1722,8 @@ with st.spinner("Pulling data from all connected SEFs..."):
             else:
                 if cfg["kind"] == "icap":
                     save_icap_snapshot(df, sel_date)   # saves AND pushes
+                else:
+                    save_sef_snapshot(df, name, sel_date)
                 all_data.append(df)
                 status_msgs.append((name, "ok", f"{len(df):,} rows (uploaded)"))
         elif cfg["kind"] == "icap":
@@ -1625,12 +1734,19 @@ with st.spinner("Pulling data from all connected SEFs..."):
                 all_data.append(df)
                 status_msgs.append((name, "ok", f"{len(df):,} rows"))
         else:
-            date_str = sel_date.strftime(cfg["date_fmt"])
-            url = cfg["url_template"].replace("{date}", date_str)
-            df, err = fetch_source(name, url, cfg["kind"], sel_date.strftime("%Y%m%d"))
+            df, err = fetch_source(name, source_urls(cfg, sel_date), cfg["kind"],
+                                   sel_date.strftime("%Y%m%d"))
             if err:
-                status_msgs.append((name, "error", err))
+                # A fetch can fail on Cloud (WAF) even when the day was saved
+                # before — fall back to the saved snapshot instead of a blank.
+                snap = load_sef_snapshot(name, sel_date)
+                if snap is not None:
+                    all_data.append(snap)
+                    status_msgs.append((name, "ok", f"{len(snap):,} rows (saved snapshot)"))
+                else:
+                    status_msgs.append((name, "error", err))
             else:
+                save_sef_snapshot(df, name, sel_date)
                 all_data.append(df)
                 status_msgs.append((name, "ok", f"{len(df):,} rows"))
 
@@ -1906,8 +2022,18 @@ def _business_days_of_month(sel: datetime):
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def build_mtd_data(sel_date_str: str, grid_sig: str):
+    """Returns (dataframe, missing) where missing lists every SEF-day that
+    couldn't be loaded — nothing fails silently anymore.
+
+    Snapshot-first: each day's parsed table is saved to sef_snapshots/ the
+    first time it's seen and pushed to the repo, so MTD reads from disk and
+    only fetches genuine gaps. This is why GFI/BGC were vanishing from the
+    MTD pies on the Streamlit Cloud version: their WAF blocks a burst of
+    8+ back-to-back requests from a datacenter IP, every historical fetch
+    got a 403, and the old code swallowed the error. Fetching each day ONCE
+    ever (and never again) both avoids the burst and survives redeploys."""
     sel = datetime.strptime(sel_date_str, "%Y%m%d")
-    frames = []
+    frames, missing = [], []
     for d in _business_days_of_month(sel):
         ds = d.strftime("%Y%m%d")
         day_frames = []
@@ -1916,11 +2042,19 @@ def build_mtd_data(sel_date_str: str, grid_sig: str):
                 snap = load_icap_snapshot(d)
                 if snap is not None:
                     day_frames.append(snap)
+                else:
+                    missing.append(f"ICAP {d:%b %d}")
                 continue
-            url = cfg["url_template"].replace("{date}", d.strftime(cfg["date_fmt"]))
-            df, _ = fetch_source_hist(name, url, cfg["kind"], ds)
+            snap = load_sef_snapshot(name, d)
+            if snap is not None:
+                day_frames.append(snap)
+                continue
+            df, _ = fetch_source_hist(name, source_urls(cfg, d), cfg["kind"], ds)
             if df is not None:
+                save_sef_snapshot(df, name, d)
                 day_frames.append(df)
+            else:
+                missing.append(f"{name} {d:%b %d}")
         if not day_frames:
             continue
         day = pd.concat(day_frames, ignore_index=True)
@@ -1933,7 +2067,7 @@ def build_mtd_data(sel_date_str: str, grid_sig: str):
         day = add_dv01(day, day_grid)
         day["Date"] = d.strftime("%Y-%m-%d")
         frames.append(day)
-    return pd.concat(frames, ignore_index=True) if frames else None
+    return (pd.concat(frames, ignore_index=True) if frames else None), missing
 
 
 mtd_data = None
@@ -1941,7 +2075,15 @@ if show_mtd:
     with st.spinner("Building month-to-date view (cached after first load)..."):
         try:
             grid_sig = str(sorted(dv01_grid.items()))
-            mtd_data = build_mtd_data(sel_date.strftime("%Y%m%d"), grid_sig)
+            mtd_data, mtd_missing = build_mtd_data(sel_date.strftime("%Y%m%d"), grid_sig)
+            if mtd_missing:
+                st.warning("MTD is missing: " + " · ".join(mtd_missing) +
+                           " — those source-days couldn't be fetched or found in saved "
+                           "snapshots, so their volume is absent from the MTD pies. "
+                           "Loading the app on each day going forward saves that day "
+                           "permanently; a missed GFI/BGC day can be backfilled by "
+                           "uploading its xlsx in Sources → Upload with that date picked.",
+                           icon="⚠️")
         except Exception as e:
             st.caption(f"Month-to-date view unavailable: {e}")
 

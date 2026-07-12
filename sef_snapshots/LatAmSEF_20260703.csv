@@ -1,0 +1,7 @@
+SEF,Tenor,Category,AssetClass,Currency,Notional_Local,Notional_USD,Trades,Trades_Estimated,Last_Price,Description,MXN_Match
+LatAm SEF,12M,IRS / Swap,IR,CLP,29000000000.0,31441767.6779,1,True,4.43,CLP vs. Camara OIS - CME - 12-Month,False
+LatAm SEF,2Y,IRS / Swap,IR,CLP,14500000000.0,15720883.8389,1,True,4.38,CLP vs. Camara OIS - CME - 2-Year,False
+LatAm SEF,4Y,IRS / Swap,IR,CLP,15000000000.0,16262983.2817,1,True,4.57,CLP vs. Camara OIS - CME - 4-Year,False
+LatAm SEF,5Y,IRS / Swap,IR,CLP,12200000000.0,13227226.4024,1,True,4.675,CLP vs. Camara OIS - CME - 5-Year,False
+LatAm SEF,10Y,IRS / Swap,IR,MXN,50000000.0,2861639.7196,1,True,8.13,MXN vs. F-TIIE OIS - CME - 130x1,True
+LatAm SEF,Other,Other,—,,0.0,0.0,1,True,0.0,,False

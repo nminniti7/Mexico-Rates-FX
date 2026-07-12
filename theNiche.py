@@ -1544,7 +1544,7 @@ with st.sidebar:
               "Notional is whatever the source file says, in the currency it was traded "
               "in. Nothing is FX-converted anywhere in this app."),
     )
-    show_exact = st.checkbox("Exact numbers (not 1.23M)", value=True)
+    show_exact = st.checkbox("Exact numbers (not 1.23M)", value=False)
     show_mtd = st.checkbox("Month-to-date share", value=True,
                            help="Pulls every prior business day this month. First load is slower.")
 
@@ -1717,6 +1717,17 @@ with st.expander("ℹ️ How this works (methodology, in one place)"):
         "(`dv01_grids/dv01_YYYYMMDD.csv`) — one file per day, never combined or appended. Every "
         "save is pushed straight to the GitHub repo so Streamlit Cloud redeploys can't lose it."
     )
+    _missing = st.session_state.get("mtd_missing", [])
+    if _missing:
+        st.markdown("---")
+        st.markdown(
+            "**Month-to-date gaps.** These source-days aren't in the MTD pies: **" +
+            "** · **".join(_missing) + "**. They weren't saved and are no longer fetchable "
+            "(BGC and tpSEF only keep the most recent days online, so a day that rolls off "
+            "before it's snapshotted is gone from the site). The app retries these on every "
+            "load and saves every day it sees going forward. To fill one in now: pick that "
+            "date in the sidebar and upload the day's file under Sources → Upload — it saves "
+            "to the repo permanently and the MTD pies update immediately.")
 
 # ═════════════════════════════════════════════════════════════════════════
 # FETCH ALL SOURCES
@@ -2105,16 +2116,8 @@ if show_mtd:
             grid_sig = str(sorted(dv01_grid.items()))
             mtd_data, mtd_missing = build_mtd_data(sel_date.strftime("%Y%m%d"), grid_sig,
                                                    _snapshot_sig())
-            if mtd_missing:
-                st.warning("MTD is missing: " + " · ".join(mtd_missing) +
-                           " — not saved and no longer fetchable (BGC and tpSEF only keep "
-                           "the most recent days online, so a day that rolls off before "
-                           "it's snapshotted is gone from the site). The app retries these "
-                           "on every load and saves every day it sees going forward. To "
-                           "fill one in now: pick that date in the sidebar and upload the "
-                           "day's file under Sources → Upload — it saves to the repo "
-                           "permanently and the MTD pies update immediately.",
-                           icon="⚠️")
+            # Surfaced only inside the "How this works" panel, not as a banner.
+            st.session_state["mtd_missing"] = mtd_missing
         except Exception as e:
             st.caption(f"Month-to-date view unavailable: {e}")
 
